@@ -22,43 +22,694 @@ An Agentic AI-powered FinOps platform built on AWS Bedrock for intelligent cloud
 - **Authentication**: AWS SSO integration
 - **Deployment**: Docker + CloudFormation
 
-## Quick Start (Local Development)
+## 🚀 Complete Setup Guide for New Users
 
 ### Prerequisites
 - Python 3.8+
 - AWS CLI v2
-- AWS SSO access to the hackathon account
+- AWS account with appropriate permissions
+- Git (for cloning the repository)
 
-### 1. Smart Startup (Recommended)
+### Step 1: Initial Setup and Testing
+
+#### 1.1 Clone and Setup Environment
 ```bash
-# One-command startup (handles venv, dependencies, and startup)
+# Clone the repository
+git clone <repository-url>
+cd vismaya-demandops
+
+# Setup virtual environment and dependencies
+python setup-venv.py
+
+# Copy environment template
+cp .env.example .env
+```
+
+#### 1.2 Configure AWS Credentials
+```bash
+# Option A: Setup AWS SSO (Recommended for SuperHack)
+python setup-aws-local.py
+
+# Option B: Manual AWS credentials setup
+aws configure
+# Enter your AWS Access Key ID, Secret Access Key, Region (us-east-2)
+
+# Option C: Use environment variables in .env file
+# Edit .env file with your AWS credentials
+```
+
+#### 1.3 Run All Tests (IMPORTANT - Do this first!)
+```bash
+# Test AWS connectivity
+python test-aws-connection.py
+
+# Test core functionality
+python local-test.py
+
+# Test chat functionality
+python test_chat_debug.py
+
+# Test main dashboard components
+python test_main_chat.py
+
+# Verify all systems are working
+python -c "
+import sys
+sys.path.append('.')
+from src.application.dependency_injection import DependencyContainer
+from config import Config
+try:
+    container = DependencyContainer(Config)
+    container.initialize()
+    print('✅ All systems operational!')
+except Exception as e:
+    print(f'❌ System check failed: {e}')
+"
+```
+
+### Step 2: Local Development
+
+#### 2.1 Smart Startup (Recommended)
+```bash
+# One-command startup (handles everything)
 python start-vismaya.py
 
 # Or use master control
 python vismaya-control.py start
 
-# Stop everything when done
-python vismaya-control.py stop
+# Check status
+python vismaya-control.py status
 ```
 
-### 2. Manual Setup
+#### 2.2 Manual Local Startup
 ```bash
-# Setup virtual environment
-python setup-venv.py
+# Activate virtual environment
+source venv/bin/activate  # Linux/Mac
+# OR
+venv\Scripts\activate     # Windows
 
-# Setup AWS credentials
-python setup-aws-local.py
+# Start the dashboard
+streamlit run dashboard.py --server.port 8502
 
-# Test AWS connectivity
-python test-aws-connection.py
+# Alternative: Use app.py
+python app.py
+```
 
-# Start with virtual environment
+#### 2.3 Access Local Dashboard
+- **URL**: `http://localhost:8502`
+- **Features**: Real AWS cost data from your account
+- **Demo Mode**: Available if no resources found
+
+### Step 3: AWS Instance Deployment (From Local)
+
+#### 3.1 Deploy to AWS from Local Machine
+```bash
+# Quick deployment script
+./deploy.sh
+
+# Or manual CloudFormation deployment
+aws cloudformation deploy \
+  --template-file deploy/cloudformation.yaml \
+  --stack-name vismaya-demandops \
+  --capabilities CAPABILITY_IAM \
+  --region us-east-2 \
+  --parameter-overrides \
+    VpcId=vpc-xxxxxxxxx \
+    SubnetIds=subnet-xxxxxxxx,subnet-yyyyyyyy
+
+# Check deployment status
+aws cloudformation describe-stacks \
+  --stack-name vismaya-demandops \
+  --query 'Stacks[0].StackStatus'
+```
+
+#### 3.2 Deploy to EC2 Instance from Local
+```bash
+# Create and configure EC2 instance
+python startup-aws.py
+
+# Or manual EC2 setup
+aws ec2 run-instances \
+  --image-id ami-0c02fb55956c7d316 \
+  --count 1 \
+  --instance-type t3.medium \
+  --key-name your-key-pair \
+  --security-groups vismaya-sg \
+  --user-data file://deploy/user-data.sh
+
+# Get instance IP
+INSTANCE_IP=$(aws ec2 describe-instances \
+  --filters "Name=tag:Name,Values=vismaya-demandops" \
+  --query 'Reservations[0].Instances[0].PublicIpAddress' \
+  --output text)
+
+echo "Dashboard will be available at: http://$INSTANCE_IP:8501"
+```
+
+### Step 4: Direct AWS Instance Deployment
+
+#### 4.1 SSH into AWS Instance
+```bash
+# SSH into your EC2 instance
+ssh -i your-key.pem ec2-user@your-instance-ip
+
+# Update system
+sudo yum update -y
+```
+
+#### 4.2 Setup Environment on AWS Instance
+```bash
+# Install required packages
+sudo yum install -y python3 python3-pip git docker
+
+# Start Docker service
+sudo systemctl start docker
+sudo systemctl enable docker
+sudo usermod -a -G docker ec2-user
+
+# Clone repository
+git clone <repository-url>
+cd vismaya-demandops
+
+# Setup Python environment
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+#### 4.3 Configure AWS Credentials on Instance
+```bash
+# Option A: Use IAM roles (Recommended for production)
+# Attach IAM role to EC2 instance with required permissions
+
+# Option B: Configure AWS CLI
+aws configure
+# Enter credentials and region
+
+# Option C: Use environment variables
+cp .env.example .env
+# Edit .env with your configuration
+```
+
+#### 4.4 Deploy on AWS Instance
+```bash
+# Using Docker (Recommended)
+docker-compose up -d
+
+# Or direct Python deployment
+python app.py
+
+# Or with systemd service (for production)
+sudo cp deploy/vismaya.service /etc/systemd/system/
+sudo systemctl enable vismaya
+sudo systemctl start vismaya
+```
+
+### Step 5: Integration with Any AWS Environment
+
+#### 5.1 Multi-Account Setup
+```bash
+# Configure multiple AWS profiles
+aws configure --profile account1
+aws configure --profile account2
+
+# Update .env for specific account
+AWS_PROFILE=account1
+AWS_REGION=us-east-2
+
+# Test connectivity to specific account
+AWS_PROFILE=account1 python test-aws-connection.py
+```
+
+#### 5.2 Cross-Account Role Assumption
+```bash
+# Setup cross-account role in .env
+AWS_ROLE_ARN=arn:aws:iam::123456789012:role/VismayaCrossAccountRole
+AWS_EXTERNAL_ID=your-external-id
+
+# Test cross-account access
+python -c "
+import boto3
+from config import Config
+session = boto3.Session()
+sts = session.client('sts')
+assumed_role = sts.assume_role(
+    RoleArn='arn:aws:iam::123456789012:role/VismayaCrossAccountRole',
+    RoleSessionName='VismayaSession'
+)
+print('✅ Cross-account access successful')
+"
+```
+
+#### 5.3 Environment Status Monitoring
+```bash
+# Create monitoring script
+cat > check_environment_status.py << 'EOF'
+#!/usr/bin/env python3
+import boto3
+import sys
+from datetime import datetime
+
+def check_aws_environment():
+    try:
+        # Test basic connectivity
+        sts = boto3.client('sts')
+        identity = sts.get_caller_identity()
+        print(f"✅ Connected to AWS Account: {identity['Account']}")
+        print(f"✅ User/Role: {identity['Arn']}")
+        
+        # Test Cost Explorer access
+        ce = boto3.client('ce')
+        response = ce.get_cost_and_usage(
+            TimePeriod={
+                'Start': '2024-01-01',
+                'End': '2024-01-02'
+            },
+            Granularity='DAILY',
+            Metrics=['BlendedCost']
+        )
+        print("✅ Cost Explorer access: OK")
+        
+        # Test EC2 access
+        ec2 = boto3.client('ec2')
+        instances = ec2.describe_instances()
+        print(f"✅ EC2 access: OK ({len(instances['Reservations'])} reservations)")
+        
+        # Test Bedrock access
+        bedrock = boto3.client('bedrock-runtime')
+        print("✅ Bedrock access: OK")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Environment check failed: {e}")
+        return False
+
+if __name__ == "__main__":
+    print(f"🔍 Checking AWS Environment Status - {datetime.now()}")
+    success = check_aws_environment()
+    sys.exit(0 if success else 1)
+EOF
+
+# Make executable and run
+chmod +x check_environment_status.py
+python check_environment_status.py
+```
+
+### Step 6: Shutdown and Cleanup Processes
+
+#### 6.1 Local Shutdown
+```bash
+# Stop local development server
+python vismaya-control.py stop
+
+# Or manual shutdown
+# Press Ctrl+C in the terminal running the dashboard
+
+# Clean up processes
+python quick-stop.py
+
+# Deactivate virtual environment
+deactivate
+```
+
+#### 6.2 AWS Instance Shutdown
+```bash
+# Graceful application shutdown
+docker-compose down
+
+# Or if running directly
+pkill -f "streamlit run"
+pkill -f "python app.py"
+
+# Stop systemd service
+sudo systemctl stop vismaya
+sudo systemctl disable vismaya
+
+# Shutdown EC2 instance
+python shutdown-aws.py
+
+# Or manual instance termination
+aws ec2 terminate-instances --instance-ids i-1234567890abcdef0
+```
+
+#### 6.3 Complete AWS Cleanup
+```bash
+# Delete CloudFormation stack
+aws cloudformation delete-stack --stack-name vismaya-demandops
+
+# Wait for deletion to complete
+aws cloudformation wait stack-delete-complete --stack-name vismaya-demandops
+
+# Clean up security groups
+aws ec2 delete-security-group --group-name vismaya-sg
+
+# Clean up any remaining resources
+python -c "
+import boto3
+ec2 = boto3.client('ec2')
+
+# Find and terminate any remaining instances
+instances = ec2.describe_instances(
+    Filters=[{'Name': 'tag:Name', 'Values': ['vismaya-demandops']}]
+)
+
+for reservation in instances['Reservations']:
+    for instance in reservation['Instances']:
+        if instance['State']['Name'] != 'terminated':
+            print(f'Terminating instance: {instance[\"InstanceId\"]}')
+            ec2.terminate_instances(InstanceIds=[instance['InstanceId']])
+"
+```
+
+#### 6.4 Cost Monitoring During Shutdown
+```bash
+# Check final costs before shutdown
+python cost-monitor.py
+
+# Generate cost report
+python -c "
+from src.application.dependency_injection import DependencyContainer
+from config import Config
+import asyncio
+
+async def final_cost_report():
+    container = DependencyContainer(Config)
+    container.initialize()
+    
+    cost_service = container.get('cost_service')
+    usage_summary = await cost_service.get_usage_summary()
+    
+    print('📊 Final Cost Report:')
+    print(f'Current Spend: \${usage_summary.budget_info.current_spend:,.2f}')
+    print(f'Budget: \${usage_summary.budget_info.total_budget:,.2f}')
+    print(f'Utilization: {usage_summary.budget_info.utilization_percentage:.1f}%')
+
+asyncio.run(final_cost_report())
+"
+```
+
+### Step 7: Troubleshooting Common Issues
+
+#### 7.1 AWS Authentication Issues
+```bash
+# Check current identity
+aws sts get-caller-identity
+
+# Re-login to SSO
+aws sso login --profile default
+
+# Test specific permissions
+aws ce get-cost-and-usage \
+  --time-period Start=2024-01-01,End=2024-01-02 \
+  --granularity DAILY \
+  --metrics BlendedCost
+```
+
+#### 7.2 Application Issues
+```bash
+# Check application logs
+tail -f ~/.streamlit/logs/streamlit.log
+
+# Test individual components
+python test_chat_debug.py
+python local-test.py
+
+# Reset application state
+rm -rf ~/.streamlit/
 python start-vismaya.py
 ```
 
-### 3. Access Dashboard
-- Open: `http://localhost:8502`
-- The dashboard shows real AWS cost data from your account
+#### 7.3 Network and Connectivity Issues
+```bash
+# Test network connectivity
+curl -I http://localhost:8502
+
+# Check port availability
+netstat -tulpn | grep 8502
+
+# Test AWS API connectivity
+curl -I https://ce.us-east-2.amazonaws.com
+```
+
+### Step 8: Status Monitoring and Health Checks
+
+#### 8.1 Real-time Status Monitoring
+```bash
+# Check application status
+python vismaya-control.py status
+
+# Monitor system resources
+python -c "
+import psutil
+import requests
+from datetime import datetime
+
+print(f'🕐 Status Check - {datetime.now()}')
+print(f'💾 Memory Usage: {psutil.virtual_memory().percent}%')
+print(f'🖥️  CPU Usage: {psutil.cpu_percent()}%')
+
+try:
+    response = requests.get('http://localhost:8502/_stcore/health', timeout=5)
+    print(f'🌐 Dashboard Status: ✅ Online' if response.status_code == 200 else '❌ Offline')
+except:
+    print('🌐 Dashboard Status: ❌ Offline')
+"
+
+# Continuous monitoring (runs every 30 seconds)
+watch -n 30 'python vismaya-control.py status'
+```
+
+#### 8.2 AWS Environment Health Check
+```bash
+# Comprehensive environment check
+python check_environment_status.py
+
+# Quick AWS connectivity test
+aws sts get-caller-identity && echo "✅ AWS Connected" || echo "❌ AWS Connection Failed"
+
+# Check specific AWS services
+python -c "
+import boto3
+services = ['ce', 'ec2', 'bedrock-runtime', 'sts']
+for service in services:
+    try:
+        client = boto3.client(service)
+        print(f'✅ {service.upper()}: Connected')
+    except Exception as e:
+        print(f'❌ {service.upper()}: {str(e)[:50]}...')
+"
+```
+
+#### 8.3 Application Performance Monitoring
+```bash
+# Monitor dashboard performance
+python -c "
+import time
+import requests
+from datetime import datetime
+
+def check_response_time():
+    start = time.time()
+    try:
+        response = requests.get('http://localhost:8502', timeout=10)
+        end = time.time()
+        response_time = (end - start) * 1000
+        print(f'⚡ Response Time: {response_time:.2f}ms')
+        print(f'📊 Status Code: {response.status_code}')
+        return response_time < 3000  # Under 3 seconds is good
+    except Exception as e:
+        print(f'❌ Request Failed: {e}')
+        return False
+
+print(f'🔍 Performance Check - {datetime.now()}')
+is_healthy = check_response_time()
+print(f'🏥 Health Status: {'✅ Healthy' if is_healthy else '⚠️ Slow/Unhealthy'}')
+"
+```
+
+### Quick Reference Commands
+
+```bash
+# Essential commands for new users
+python setup-venv.py              # Setup environment
+python test-aws-connection.py     # Test AWS access
+python local-test.py              # Run all tests
+python start-vismaya.py           # Start locally
+python vismaya-control.py status  # Check status
+python shutdown-aws.py           # Shutdown AWS resources
+python quick-stop.py             # Emergency stop
+
+# Monitoring commands
+python check_environment_status.py # Check AWS environment
+python vismaya-control.py status   # Application status
+python cost-monitor.py            # Cost monitoring
+
+# Deployment commands
+./deploy.sh                       # Deploy to AWS
+python startup-aws.py            # Start AWS instance
+docker-compose up -d             # Docker deployment
+```
+
+### 📋 Pre-Deployment Checklist
+
+Before deploying to production, ensure:
+
+- [ ] All tests pass (`python local-test.py`)
+- [ ] AWS connectivity verified (`python test-aws-connection.py`)
+- [ ] Environment variables configured (`.env` file)
+- [ ] AWS permissions validated
+- [ ] Chat functionality tested (`python test_chat_debug.py`)
+- [ ] Demo mode works (for accounts with no resources)
+- [ ] Shutdown procedures tested
+- [ ] Monitoring scripts functional
+- [ ] Backup procedures in place
+
+### 🔄 Complete Workflow for New Users
+
+#### First-Time Setup (Do Once)
+```bash
+# 1. Clone and setup
+git clone <repository-url>
+cd vismaya-demandops
+python setup-venv.py
+
+# 2. Configure environment
+cp .env.example .env
+# Edit .env with your AWS credentials
+
+# 3. Run all tests
+python test-aws-connection.py
+python local-test.py
+python test_chat_debug.py
+```
+
+#### Daily Development Workflow
+```bash
+# 1. Check environment status
+python check_environment_status.py
+
+# 2. Start local development
+python start-vismaya.py
+# Access: http://localhost:8502
+
+# 3. Monitor during development
+python vismaya-control.py status
+
+# 4. Stop when done
+python vismaya-control.py stop
+```
+
+#### Production Deployment Workflow
+```bash
+# 1. Pre-deployment checks
+python check_environment_status.py
+python local-test.py
+
+# 2. Deploy to AWS
+./deploy.sh
+# OR
+python startup-aws.py
+
+# 3. Verify deployment
+python check_environment_status.py
+curl -I http://your-instance-ip:8501
+
+# 4. Monitor production
+python cost-monitor.py
+```
+
+#### Shutdown and Cleanup Workflow
+```bash
+# 1. Stop local development
+python vismaya-control.py stop
+
+# 2. Shutdown AWS resources
+python shutdown-aws.py
+
+# 3. Verify cleanup
+aws ec2 describe-instances --filters "Name=tag:Project,Values=VismayaDemandOps"
+aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE
+
+# 4. Final cost check
+python cost-monitor.py
+```
+
+### 🆘 Emergency Procedures
+
+#### Emergency Stop (All Environments)
+```bash
+# Stop everything immediately
+python quick-stop.py
+
+# Force shutdown AWS resources
+python shutdown-aws.py
+
+# Kill all local processes
+pkill -f streamlit
+pkill -f "python app.py"
+```
+
+#### Recovery from Issues
+```bash
+# Reset local environment
+rm -rf venv/
+python setup-venv.py
+python start-vismaya.py
+
+# Reset AWS credentials
+aws sso logout
+aws sso login --profile default
+python test-aws-connection.py
+
+# Check for stuck resources
+python check_environment_status.py
+```
+
+### 📞 Support and Troubleshooting
+
+#### Common Issues and Solutions
+
+1. **"AWS credentials not found"**
+   ```bash
+   python setup-aws-local.py
+   aws sts get-caller-identity
+   ```
+
+2. **"Chat not responding"**
+   ```bash
+   python test_chat_debug.py
+   # Check if Bedrock is accessible in your region
+   ```
+
+3. **"Dashboard won't start"**
+   ```bash
+   python check_environment_status.py
+   netstat -tulpn | grep 8502
+   ```
+
+4. **"High AWS costs"**
+   ```bash
+   python cost-monitor.py
+   python shutdown-aws.py
+   ```
+
+#### Getting Help
+
+- **Environment Issues**: Run `python check_environment_status.py`
+- **AWS Issues**: Run `python test-aws-connection.py`
+- **Application Issues**: Check logs in `~/.streamlit/logs/`
+- **Cost Issues**: Run `python cost-monitor.py`
+
+### 🎯 Success Metrics
+
+Your setup is successful when:
+- ✅ All tests pass without errors
+- ✅ Dashboard loads at `http://localhost:8502`
+- ✅ Chat responds to "what is my current spending?"
+- ✅ AWS resources are visible in the dashboard
+- ✅ Demo mode works when no resources exist
+- ✅ Shutdown process completes without errors
 
 ## Deployment Options
 
@@ -207,7 +858,7 @@ AWS_REGION=us-east-2
 AWS_PROFILE=default
 
 # SSO Configuration  
-SSO_START_URL=https://superopsglobalhackathon.awsapps.com/start/#
+SSO_START_URL=https://your-sso-domain.awsapps.com/start/#
 SSO_REGION=us-east-2
 
 # Application
@@ -307,7 +958,7 @@ vismaya-demandops/
 
 ## License
 
-MIT License - Built for AWS Global Hackathon 2025
+MIT License - Built for AWS SuperHack 2025 by Team MaximAI
 #
 # 🐳 Docker Configuration
 
@@ -589,4 +1240,4 @@ To democratize cloud cost optimization through intelligent AI-powered solutions 
 
 ## License
 
-MIT License - Built for AWS Global Hackathon 2024 by **Team MaximAI**
+MIT License - Built for AWS SuperHack 2025 by **Team MaximAI**
