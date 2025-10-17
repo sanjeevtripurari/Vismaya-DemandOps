@@ -1,0 +1,230 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Vismaya DemandOps - AI-Powered FinOps Platform for AWS Cost Optimization - Team MaximAI'
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID for the application
+  
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Subnet IDs for the application (at least 2)
+  
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: EC2 Key Pair for SSH access
+    Default: ''
+  
+  InstanceType:
+    Type: String
+    Default: t3.medium
+    AllowedValues:
+      - t3.small
+      - t3.medium
+      - t3.large
+    Description: EC2 instance type
+
+Resources:
+  # Security Group
+  VismayaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Vismaya DemandOps
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8501
+          ToPort: 8501
+          CidrIp: 0.0.0.0/0
+          Description: Streamlit dashboard
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: SSH access
+      Tags:
+        - Key: Name
+          Value: vismaya-security-group
+
+  # IAM Role for EC2
+  VismayaEC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/ReadOnlyAccess
+      Policies:
+        - PolicyName: VismayaBedrockAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:ListFoundationModels
+                Resource: '*'
+        - PolicyName: VismayaCostExplorerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ce:GetCostAndUsage
+                  - ce:GetUsageReport
+                  - ce:GetReservationCoverage
+                  - ce:GetReservationPurchaseRecommendation
+                  - ce:GetReservationUtilization
+                  - ce:ListCostCategoryDefinitions
+                  - ce:GetRightsizingRecommendation
+                Resource: '*'
+      Tags:
+        - Key: Name
+          Value: vismaya-ec2-role
+
+  # Instance Profile
+  VismayaInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref VismayaEC2Role
+
+  # Launch Template
+  VismayaLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: vismaya-launch-template
+      LaunchTemplateData:
+        ImageId: ami-0c02fb55956c7d316  # Amazon Linux 2023
+        InstanceType: !Ref InstanceType
+        KeyName: !Ref KeyPairName
+        IamInstanceProfile:
+          Arn: !GetAtt VismayaInstanceProfile.Arn
+        SecurityGroupIds:
+          - !Ref VismayaSecurityGroup
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            yum update -y
+            yum install -y docker git
+            systemctl start docker
+            systemctl enable docker
+            usermod -a -G docker ec2-user
+            
+            # Install Docker Compose
+            curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+            chmod +x /usr/local/bin/docker-compose
+            
+            # Clone and setup application
+            cd /home/ec2-user
+            git clone https://github.com/your-repo/vismaya-demandops.git
+            cd vismaya-demandops
+            
+            # Create production environment file
+            cat > .env << EOF
+            AWS_REGION=us-east-2
+            ENVIRONMENT=production
+            DEBUG=false
+            PORT=8501
+            BEDROCK_MODEL_ID=anthropic.claude-3-sonnet-20240229-v1:0
+            DEFAULT_BUDGET=15000
+            EOF
+            
+            # Start the application
+            docker-compose up -d
+            
+            # Setup log rotation
+            echo "0 2 * * * docker system prune -f" | crontab -
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: vismaya-demandops
+
+  # Auto Scaling Group
+  VismayaAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: vismaya-asg
+      LaunchTemplate:
+        LaunchTemplateId: !Ref VismayaLaunchTemplate
+        Version: !GetAtt VismayaLaunchTemplate.LatestVersionNumber
+      MinSize: 1
+      MaxSize: 3
+      DesiredCapacity: 1
+      VPCZoneIdentifier: !Ref SubnetIds
+      HealthCheckType: EC2
+      HealthCheckGracePeriod: 300
+      Tags:
+        - Key: Name
+          Value: vismaya-asg-instance
+          PropagateAtLaunch: true
+
+  # Application Load Balancer
+  VismayaALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: vismaya-alb
+      Scheme: internet-facing
+      Type: application
+      Subnets: !Ref SubnetIds
+      SecurityGroups:
+        - !Ref VismayaSecurityGroup
+      Tags:
+        - Key: Name
+          Value: vismaya-alb
+
+  # Target Group
+  VismayaTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: vismaya-targets
+      Port: 8501
+      Protocol: HTTP
+      VpcId: !Ref VpcId
+      HealthCheckPath: /_stcore/health
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Tags:
+        - Key: Name
+          Value: vismaya-target-group
+
+  # Listener
+  VismayaListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref VismayaTargetGroup
+      LoadBalancerArn: !Ref VismayaALB
+      Port: 80
+      Protocol: HTTP
+
+  # Auto Scaling Group Target Group Attachment
+  VismayaASGTargetGroupAttachment:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Ref VismayaAutoScalingGroup
+      TargetGroupARNs:
+        - !Ref VismayaTargetGroup
+
+Outputs:
+  ApplicationURL:
+    Description: URL of the Vismaya DemandOps application
+    Value: !Sub 'http://${VismayaALB.DNSName}'
+    Export:
+      Name: !Sub '${AWS::StackName}-ApplicationURL'
+  
+  LoadBalancerDNS:
+    Description: DNS name of the load balancer
+    Value: !GetAtt VismayaALB.DNSName
+    Export:
+      Name: !Sub '${AWS::StackName}-LoadBalancerDNS'

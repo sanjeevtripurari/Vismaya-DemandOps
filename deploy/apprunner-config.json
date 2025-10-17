@@ -1,0 +1,44 @@
+{
+  "ServiceName": "vismaya-demandops",
+  "SourceConfiguration": {
+    "ImageRepository": {
+      "ImageIdentifier": "ACCOUNT_ID.dkr.ecr.us-east-2.amazonaws.com/vismaya-demandops:latest",
+      "ImageConfiguration": {
+        "Port": "8501",
+        "RuntimeEnvironmentVariables": {
+          "AWS_REGION": "us-east-2",
+          "ENVIRONMENT": "production",
+          "DEBUG": "false",
+          "PORT": "8501",
+          "DEFAULT_BUDGET": "15000"
+        },
+        "StartCommand": "python app.py"
+      },
+      "ImageRepositoryType": "ECR"
+    },
+    "AutoDeploymentsEnabled": true
+  },
+  "InstanceConfiguration": {
+    "Cpu": "0.25 vCPU",
+    "Memory": "0.5 GB",
+    "InstanceRoleArn": "arn:aws:iam::ACCOUNT_ID:role/VismayaAppRunnerRole"
+  },
+  "HealthCheckConfiguration": {
+    "Protocol": "HTTP",
+    "Path": "/_stcore/health",
+    "Interval": 10,
+    "Timeout": 5,
+    "HealthyThreshold": 1,
+    "UnhealthyThreshold": 5
+  },
+  "Tags": [
+    {
+      "Key": "Project",
+      "Value": "VismayaDemandOps"
+    },
+    {
+      "Key": "Environment",
+      "Value": "Production"
+    }
+  ]
+}

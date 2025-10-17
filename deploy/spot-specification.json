@@ -1,0 +1,29 @@
+{
+  "ImageId": "ami-0c02fb55956c7d316",
+  "InstanceType": "t3.medium",
+  "KeyName": "your-key-pair",
+  "SecurityGroups": ["vismaya-sg"],
+  "UserData": "IyEvYmluL2Jhc2gKCiMgVXBkYXRlIHN5c3RlbQp5dW0gdXBkYXRlIC15CgojIEluc3RhbGwgRG9ja2VyCnl1bSBpbnN0YWxsIC15IGRvY2tlciBnaXQKc3lzdGVtY3RsIHN0YXJ0IGRvY2tlcgpzeXN0ZW1jdGwgZW5hYmxlIGRvY2tlcgp1c2VybW9kIC1hIC1HIGRvY2tlciBlYzItdXNlcgoKIyBJbnN0YWxsIERvY2tlciBDb21wb3NlCmN1cmwgLUwgImh0dHBzOi8vZ2l0aHViLmNvbS9kb2NrZXIvY29tcG9zZS9yZWxlYXNlcy9sYXRlc3QvZG93bmxvYWQvZG9ja2VyLWNvbXBvc2UtJCh1bmFtZSAtcyktJCh1bmFtZSAtbSkiIC1vIC91c3IvbG9jYWwvYmluL2RvY2tlci1jb21wb3NlCmNobW9kICt4IC91c3IvbG9jYWwvYmluL2RvY2tlci1jb21wb3NlCgojIENsb25lIGFuZCBzdGFydCBhcHBsaWNhdGlvbgpjZCAvaG9tZS9lYzItdXNlcgpnaXQgY2xvbmUgaHR0cHM6Ly9naXRodWIuY29tL3lvdXItcmVwby92aXNtYXlhLWRlbWFuZG9wcy5naXQKY2QgdmlzbWF5YS1kZW1hbmRvcHMKCiMgQ3JlYXRlIHByb2R1Y3Rpb24gZW52aXJvbm1lbnQgZmlsZQpjYXQgPiAuZW52IDw8IEVPRQPBV1NfUkVHSU9OPXVZLWVHC3QtMgpFTlZJUk9OTUVOVD1wcm9kdWN0aW9uCkRFQlVHPWZhbHNlClBPUlQ9ODUwMQpCRURST0NLX01PREVMX0lEPWFudGhyb3BpYy5jbGF1ZGUtMy1zb25uZXQtMjAyNDAyMjktdjE6MApERUZBVUxUX0JVREdFVD0xNTAwMApFT0YKCiMgU3RhcnQgdGhlIGFwcGxpY2F0aW9uCmRvY2tlci1jb21wb3NlIHVwIC1kCgojIFNldHVwIGxvZyByb3RhdGlvbgplY2hvICIwIDIgKiAqICogZG9ja2VyIHN5c3RlbSBwcnVuZSAtZiIgfCBjcm9udGFiIC0=",
+  "IamInstanceProfile": {
+    "Name": "VismayaEC2InstanceProfile"
+  },
+  "TagSpecifications": [
+    {
+      "ResourceType": "instance",
+      "Tags": [
+        {
+          "Key": "Name",
+          "Value": "vismaya-spot-instance"
+        },
+        {
+          "Key": "Project",
+          "Value": "VismayaDemandOps"
+        },
+        {
+          "Key": "Environment",
+          "Value": "Development"
+        }
+      ]
+    }
+  ]
+}
