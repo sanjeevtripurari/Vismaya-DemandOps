@@ -589,4 +589,4 @@ To democratize cloud cost optimization through intelligent AI-powered solutions 
 
 ## License
 
-MIT License - Built for AWS Global Hackathon 2024 by **Team MaximAI**
+MIT License - Built for AWS SuperHack 2025 by **Team MaximAI**
