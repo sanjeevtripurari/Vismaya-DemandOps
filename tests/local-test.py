@@ -3,6 +3,9 @@
 Local Testing Script for Vismaya DemandOps
 Tests the application locally before deployment
 """
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 
 import subprocess
 import sys
@@ -50,20 +53,29 @@ def test_bedrock_access():
         assistant = AIAssistant()
         
         if assistant.bedrock is None:
-            print("⚠️  Bedrock not available - using mock responses")
+            user_email = getattr(Config, 'AWS_USER_EMAIL', 'your account')
+            print(f"❌ Bedrock not available for {user_email}")
+            print("   💡 Contact AWS administrator to add bedrock:InvokeModel permission")
             return False
         
         # Try a simple test
         response = assistant.analyze_costs(1000, 5000, 1200, {'EC2': 500, 'RDS': 500})
-        if response:
+        if response and not response.startswith("I'm having trouble"):
             print("✅ Bedrock access successful")
             return True
         else:
-            print("⚠️  Bedrock test failed - using mock responses")
+            user_email = getattr(Config, 'AWS_USER_EMAIL', 'your account')
+            print(f"❌ Bedrock access denied for {user_email}")
+            print("   💡 Contact AWS administrator to add bedrock:InvokeModel permission")
             return False
     except Exception as e:
-        print(f"⚠️  Bedrock access warning: {e}")
-        print("📝 App will use mock responses")
+        error_str = str(e)
+        if 'AccessDenied' in error_str or 'not authorized' in error_str:
+            user_email = getattr(Config, 'AWS_USER_EMAIL', 'your account')
+            print(f"❌ Bedrock access denied for {user_email}")
+            print("   💡 Contact AWS administrator to add bedrock:InvokeModel permission")
+        else:
+            print(f"❌ Bedrock connection failed: {error_str[:100]}...")
         return False
 
 def start_app_background():
@@ -130,9 +142,9 @@ def main():
             print(f"\n🎉 Success! Application is running at:")
             print(f"📊 http://localhost:{Config.PORT}")
             print("\n📋 Test Results:")
-            print(f"   AWS Connection: {'✅' if aws_ok else '⚠️  (Mock data)'}")
-            print(f"   Bedrock AI: {'✅' if bedrock_ok else '⚠️  (Mock responses)'}")
-            print(f"   Application: ✅")
+            print(f"   AWS Connection: {'✅ Working' if aws_ok else '❌ Issues detected'}")
+            print(f"   Bedrock AI: {'✅ Working' if bedrock_ok else '❌ Permission needed'}")
+            print(f"   Application: ✅ Working")
             print("\n🛑 Press Ctrl+C to stop the application")
             
             # Keep running

@@ -21,10 +21,10 @@ class GetUsageSummaryUseCase:
     def __init__(self, 
                  cost_service: CostAnalysisService,
                  resource_service: ResourceManagementService,
-                 default_budget: float = 15000):
+                 config):
         self._cost_service = cost_service
         self._resource_service = resource_service
-        self._default_budget = default_budget
+        self._config = config
     
     async def execute(self) -> UsageSummary:
         """Execute the use case"""
@@ -48,10 +48,12 @@ class GetUsageSummaryUseCase:
                     base_amount=current_costs.amount
                 )
             
-            # Create budget info
+            # Create budget info with warning and maximum limits
             budget_info = BudgetInfo(
-                total_budget=self._default_budget,
-                current_spend=current_costs.amount
+                total_budget=self._config.BUDGET_WARNING_LIMIT,
+                current_spend=current_costs.amount,
+                warning_limit=self._config.BUDGET_WARNING_LIMIT,
+                maximum_limit=self._config.BUDGET_MAXIMUM_LIMIT
             )
             
             # Create usage summary
@@ -81,8 +83,10 @@ class GetUsageSummaryUseCase:
         """Create minimal summary for error cases"""
         return UsageSummary(
             budget_info=BudgetInfo(
-                total_budget=self._default_budget,
-                current_spend=0.0
+                total_budget=self._config.BUDGET_WARNING_LIMIT,
+                current_spend=0.0,
+                warning_limit=self._config.BUDGET_WARNING_LIMIT,
+                maximum_limit=self._config.BUDGET_MAXIMUM_LIMIT
             ),
             service_costs=[],
             ec2_instances=[],

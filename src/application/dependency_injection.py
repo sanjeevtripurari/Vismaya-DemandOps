@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 class SimpleForecastingService(IForecastingService):
-    """Simple forecasting implementation"""
+    """Enhanced forecasting implementation with organic growth projections"""
     
     async def generate_forecast(self, historical_data):
         from ..core.models import CostForecast
@@ -39,20 +39,36 @@ class SimpleForecastingService(IForecastingService):
                 base_amount=0.0
             )
         
-        # Simple linear trend forecast
+        # Calculate organic growth based on current usage patterns
         recent_amount = historical_data[-1].amount
+        
         if len(historical_data) > 1:
+            # Calculate trend from historical data
             previous_amount = historical_data[-2].amount
-            trend_factor = recent_amount / previous_amount if previous_amount > 0 else 1.1
+            growth_rate = (recent_amount - previous_amount) / previous_amount if previous_amount > 0 else 0
         else:
-            trend_factor = 1.1
+            # For single data point, assume minimal organic growth
+            growth_rate = 0.05  # 5% monthly growth for new accounts
+        
+        # Cap growth rate to realistic bounds
+        growth_rate = max(-0.5, min(growth_rate, 2.0))  # Between -50% and 200%
+        
+        # Calculate daily growth rate
+        daily_growth_rate = growth_rate / 30
+        
+        # Project 30-day forecast with organic growth
+        forecasted_amount = recent_amount * (1 + growth_rate)
+        
+        # Calculate confidence based on data availability
+        confidence = min(0.9, 0.5 + (len(historical_data) * 0.1))
         
         return CostForecast(
-            forecasted_amount=recent_amount * trend_factor,
-            confidence_level=0.8,
+            forecasted_amount=forecasted_amount,
+            confidence_level=confidence,
             forecast_period_days=30,
             base_amount=recent_amount,
-            trend_factor=trend_factor
+            trend_factor=1 + growth_rate,
+            daily_growth_rate=daily_growth_rate
         )
     
     async def analyze_scenario(self, current_usage, scenario):
@@ -99,7 +115,7 @@ class DependencyContainer:
             self._services['data_repository'] = SQLiteRepository()
             
             # Data providers
-            self._services['cost_provider'] = AWSCostProvider(aws_session)
+            self._services['cost_provider'] = AWSCostProvider(aws_session, self._config)
             self._services['resource_provider'] = AWSResourceProvider(aws_session)
             self._services['forecasting_service'] = SimpleForecastingService()
             self._services['ai_assistant'] = BedrockAIAssistant(
@@ -122,7 +138,7 @@ class DependencyContainer:
             self._services['get_usage_summary_use_case'] = GetUsageSummaryUseCase(
                 self._services['cost_service'],
                 self._services['resource_service'],
-                self._config.DEFAULT_BUDGET
+                self._config
             )
             
             self._services['analyze_scenario_use_case'] = AnalyzeScenarioUseCase(

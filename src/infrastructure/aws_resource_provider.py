@@ -1,4 +1,4 @@
-"""
+﻿"""
 AWS Resource Provider
 Implements IResourceProvider interface
 Following Dependency Inversion Principle
@@ -37,9 +37,18 @@ class AWSResourceProvider(IResourceProvider):
         """Get EC2 instances"""
         try:
             if not self._ec2_client:
-                return self._get_mock_ec2_instances()
+                logger.error("EC2 client not available")
+                return []
+            
+            # Track API cost
+            from ..services.api_cost_tracker import api_cost_tracker
             
             response = self._ec2_client.describe_instances()
+            
+            # Track the API call
+            instance_count = sum(len(r['Instances']) for r in response['Reservations'])
+            api_cost_tracker.track_ec2_call('DescribeInstances', instance_count)
+            
             instances = []
             
             for reservation in response['Reservations']:
@@ -65,19 +74,30 @@ class AWSResourceProvider(IResourceProvider):
                         tags=tags
                     ))
             
-            return instances if instances else self._get_mock_ec2_instances()
+            logger.info(f"âœ… Retrieved {len(instances)} real EC2 instances")
+            return instances
             
         except Exception as e:
-            logger.error(f"Error fetching EC2 instances: {e}")
-            return self._get_mock_ec2_instances()
+            logger.error(f"âŒ Error fetching EC2 instances: {e}")
+            # NO MOCK DATA - return empty list for real data
+            return []
     
     async def get_storage_volumes(self) -> List[StorageVolume]:
         """Get EBS volumes"""
         try:
             if not self._ec2_client:
-                return self._get_mock_storage_volumes()
+                logger.error("EC2 client not available for storage volumes")
+                return []
+            
+            # Track API cost
+            from ..services.api_cost_tracker import api_cost_tracker
             
             response = self._ec2_client.describe_volumes()
+            
+            # Track the API call
+            volume_count = len(response['Volumes'])
+            api_cost_tracker.track_ec2_call('DescribeVolumes', volume_count)
+            
             volumes = []
             
             for volume in response['Volumes']:
@@ -97,19 +117,30 @@ class AWSResourceProvider(IResourceProvider):
                     attached_instance=attached_instance
                 ))
             
-            return volumes if volumes else self._get_mock_storage_volumes()
+            logger.info(f"âœ… Retrieved {len(volumes)} real storage volumes")
+            return volumes
             
         except Exception as e:
-            logger.error(f"Error fetching storage volumes: {e}")
-            return self._get_mock_storage_volumes()
+            logger.error(f"âŒ Error fetching storage volumes: {e}")
+            # NO MOCK DATA - return empty list for real data
+            return []
     
     async def get_database_instances(self) -> List[DatabaseInstance]:
         """Get RDS instances"""
         try:
             if not self._rds_client:
-                return self._get_mock_database_instances()
+                logger.error("RDS client not available")
+                return []
+            
+            # Track API cost
+            from ..services.api_cost_tracker import api_cost_tracker
             
             response = self._rds_client.describe_db_instances()
+            
+            # Track the API call
+            db_count = len(response['DBInstances'])
+            api_cost_tracker.track_rds_call('DescribeDBInstances', db_count)
+            
             databases = []
             
             for db in response['DBInstances']:
@@ -124,11 +155,13 @@ class AWSResourceProvider(IResourceProvider):
                     status=db['DBInstanceStatus']
                 ))
             
-            return databases if databases else self._get_mock_database_instances()
+            logger.info(f"âœ… Retrieved {len(databases)} real database instances")
+            return databases
             
         except Exception as e:
-            logger.error(f"Error fetching database instances: {e}")
-            return self._get_mock_database_instances()
+            logger.error(f"âŒ Error fetching database instances: {e}")
+            # NO MOCK DATA - return empty list for real data
+            return []
     
     def _estimate_ec2_cost(self, instance_type: str) -> float:
         """Estimate monthly EC2 cost (rough calculation)"""
@@ -196,76 +229,3 @@ class AWSResourceProvider(IResourceProvider):
         multiplier = engine_multiplier.get(engine, 1.0)
         return base_cost * multiplier
     
-    def _get_mock_ec2_instances(self) -> List[EC2Instance]:
-        """Mock EC2 instances for demo"""
-        return [
-            EC2Instance(
-                instance_id="i-1234567890abcdef0",
-                instance_type="t3.medium",
-                state=InstanceState.RUNNING,
-                name="Web Server 1",
-                monthly_cost=30.40,
-                tags={"Environment": "Production", "Team": "WebDev"}
-            ),
-            EC2Instance(
-                instance_id="i-0987654321fedcba0",
-                instance_type="t3.large",
-                state=InstanceState.RUNNING,
-                name="Database Server",
-                monthly_cost=60.80,
-                tags={"Environment": "Production", "Team": "Database"}
-            ),
-            EC2Instance(
-                instance_id="i-abcdef1234567890",
-                instance_type="t3.small",
-                state=InstanceState.STOPPED,
-                name="Development Server",
-                monthly_cost=0.0,  # Stopped instance
-                tags={"Environment": "Development", "Team": "DevOps"}
-            )
-        ]
-    
-    def _get_mock_storage_volumes(self) -> List[StorageVolume]:
-        """Mock storage volumes for demo"""
-        return [
-            StorageVolume(
-                volume_id="vol-1234567890abcdef0",
-                size_gb=100,
-                volume_type="gp3",
-                monthly_cost=8.0,
-                attached_instance="i-1234567890abcdef0"
-            ),
-            StorageVolume(
-                volume_id="vol-0987654321fedcba0",
-                size_gb=500,
-                volume_type="gp3",
-                monthly_cost=40.0,
-                attached_instance="i-0987654321fedcba0"
-            ),
-            StorageVolume(
-                volume_id="vol-abcdef1234567890",
-                size_gb=50,
-                volume_type="gp2",
-                monthly_cost=5.0,
-                attached_instance="i-abcdef1234567890"
-            )
-        ]
-    
-    def _get_mock_database_instances(self) -> List[DatabaseInstance]:
-        """Mock database instances for demo"""
-        return [
-            DatabaseInstance(
-                db_instance_id="prod-db-1",
-                engine="mysql",
-                instance_class="db.t3.medium",
-                monthly_cost=49.64,
-                status="available"
-            ),
-            DatabaseInstance(
-                db_instance_id="analytics-db",
-                engine="postgres",
-                instance_class="db.r5.large",
-                monthly_cost=174.72,
-                status="available"
-            )
-        ]

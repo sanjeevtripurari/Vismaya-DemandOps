@@ -122,8 +122,8 @@ Resources:
             
             # Clone and setup application
             cd /home/ec2-user
-            git clone https://github.com/your-repo/vismaya-demandops.git
-            cd vismaya-demandops
+            git clone https://github.com/sanjeevtripurari/Vismaya-DemandOps.git
+            cd Vismaya-DemandOps
             
             # Create production environment file
             cat > .env << EOF
@@ -131,8 +131,10 @@ Resources:
             ENVIRONMENT=production
             DEBUG=false
             PORT=8501
-            BEDROCK_MODEL_ID=anthropic.claude-3-sonnet-20240229-v1:0
-            DEFAULT_BUDGET=15000
+            BEDROCK_MODEL_ID=us.anthropic.claude-3-haiku-20240307-v1:0
+            DEFAULT_BUDGET=80
+            BUDGET_WARNING_LIMIT=80
+            BUDGET_MAXIMUM_LIMIT=100
             EOF
             
             # Start the application

@@ -1,0 +1,39 @@
+# Docker Compose Override Example
+# Copy this file to docker-compose.override.yml and customize for your environment
+# This file allows platform-specific configurations without modifying main files
+
+version: '3.8'
+
+services:
+  vismaya:
+    # Uncomment the appropriate AWS credentials mounting for your platform:
+    
+    # For Linux/Mac users:
+    # volumes:
+    #   - ${HOME}/.aws:/home/appuser/.aws:ro
+    
+    # For Windows users:
+    # volumes:
+    #   - ${USERPROFILE}/.aws:/home/appuser/.aws:ro
+    
+    # Cross-platform (recommended):
+    # volumes:
+    #   - ${HOME:-${USERPROFILE}}/.aws:/home/appuser/.aws:ro
+    
+    # Additional environment variables (if needed):
+    # environment:
+    #   - CUSTOM_VAR=value
+    
+    # Platform-specific resource limits:
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '1.0'
+    #       memory: 2G
+
+# Example usage:
+# 1. Copy this file: cp docker-compose.override.yml.example docker-compose.override.yml
+# 2. Uncomment and modify the sections you need
+# 3. Run: docker-compose up -d
+# 
+# Docker Compose will automatically merge this with docker-compose.yml

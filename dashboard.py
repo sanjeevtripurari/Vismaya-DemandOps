@@ -568,10 +568,14 @@ class VismayaDashboard:
         self.repository = SQLiteRepository()
         
     def load_data(self):
-        """Load AWS cost and usage data"""
+        """Load AWS cost and usage data - Production Ready"""
         if 'data_loaded' not in st.session_state or st.button("🔄 Refresh Data"):
-            with st.spinner("Loading AWS data..."):
+            with st.spinner("Loading real AWS data..."):
                 try:
+                    # Log deployment environment for debugging
+                    from src.infrastructure.error_handler import AWSErrorHandler
+                    deployment_context = AWSErrorHandler.log_deployment_info()
+                    
                     # Use the new use case pattern
                     usage_summary_use_case = self.container.get_use_case('get_usage_summary')
                     usage_summary = asyncio.run(usage_summary_use_case.execute())
@@ -582,20 +586,35 @@ class VismayaDashboard:
                     st.session_state.usage_summary = usage_summary
                     st.session_state.data_loaded = True
                     st.session_state.last_refresh = datetime.now()
+                    st.session_state.error_message = None
+                    
+                    st.success(f"✅ Real AWS data loaded successfully (${usage_summary.budget_info.current_spend:.2f})")
                     
                 except Exception as e:
-                    st.error(f"Error loading data: {e}")
-                    # Try to load from database
-                    try:
-                        historical_data = asyncio.run(self.repository.get_historical_summaries(1))
-                        if historical_data:
-                            st.session_state.usage_summary = historical_data[0]['data']
-                            st.session_state.data_loaded = True
-                            st.info("Loaded cached data from database")
+                    error_message = str(e)
+                    st.session_state.error_message = error_message
+                    st.session_state.data_loaded = False
+                    
+                    # Show clear error message
+                    st.error(f"❌ Cannot load AWS data: {error_message}")
+                    
+                    # Show deployment context for debugging
+                    with st.expander("🔧 Troubleshooting Information"):
+                        st.write("**Deployment Environment:**")
+                        st.json(deployment_context)
+                        
+                        st.write("**Common Solutions:**")
+                        if deployment_context['environment'] == 'local':
+                            st.write("- Check your AWS credentials in .env file")
+                            st.write("- Run: `aws sts get-caller-identity` to test credentials")
+                            st.write("- Ensure Cost Explorer is enabled in your AWS account")
                         else:
-                            st.session_state.data_loaded = False
-                    except:
-                        st.session_state.data_loaded = False
+                            st.write("- Ensure IAM role has Cost Explorer permissions")
+                            st.write("- Check security groups allow outbound HTTPS")
+                            st.write("- Verify AWS region is correct")
+                    
+                    # Don't try to load cached data - show real error instead
+                    st.session_state.data_loaded = False
     
     def calculate_metrics(self):
         """Calculate key financial metrics"""
@@ -630,7 +649,7 @@ class VismayaDashboard:
     
     def render_navigation(self):
         """Render navigation tabs"""
-        return st.tabs(["Current Usage", "Detailed Usage", "Forecast", "Historical Data", "Settings"])
+        return st.tabs(["Current Usage", "Detailed Usage", "Detailed Billing", "Forecast", "Historical Data", "Settings"])
     
     def render_metrics_row(self, metrics):
         """Render the top metrics row"""
@@ -976,6 +995,9 @@ Use the buttons above or ask me directly!""")
         # Top metrics row
         self.render_metrics_row(metrics)
         
+        # Budget alerts section
+        self.render_budget_alerts()
+        
         # Show demo mode toggle if no resources
         if not metrics.get('has_resources', True):
             col1, col2, col3 = st.columns([1, 1, 2])
@@ -1008,22 +1030,154 @@ Use the buttons above or ask me directly!""")
             # AI Assistant section
             self.render_ai_assistant(metrics)
     
+    def render_detailed_billing_tab(self):
+        """Render the Detailed Billing tab content"""
+        from src.ui.detailed_billing import DetailedBillingUI
+        DetailedBillingUI.render_complete_billing_tab()
+    
     def render_detailed_usage_tab(self):
-        """Render the Detailed Usage tab content"""
-        st.subheader("Detailed AWS Resource Usage")
+        """Render the Enhanced Detailed Usage tab with proper cost breakdown"""
+        st.subheader("📋 Detailed Cost Breakdown")
         
-        # Add refresh button - more compact
+        # Add refresh button
         col1, col2 = st.columns([1, 2])
         with col1:
             if st.button("🔄 Refresh", key="refresh_detailed"):
+                if 'data_loaded' in st.session_state:
+                    del st.session_state.data_loaded
                 st.rerun()
-        with col2:
-            auto_refresh = st.checkbox("Auto-refresh", value=False)
         
-        if auto_refresh:
-            import time
-            time.sleep(30)
-            st.rerun()
+        try:
+            if not hasattr(st.session_state, 'usage_summary') or st.session_state.usage_summary is None:
+                st.warning("Loading usage data...")
+                return
+            
+            usage_summary = st.session_state.usage_summary
+            
+            # Cost Summary Section
+            st.markdown("### 💰 Cost Summary")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("Total Cost", f"${usage_summary.budget_info.current_spend:.2f}")
+            
+            with col2:
+                # Calculate tax information
+                total_pre_tax = sum(getattr(sc.cost, 'pre_tax_amount', 0) or 0 for sc in usage_summary.service_costs)
+                if total_pre_tax > 0:
+                    st.metric("Pre-tax Cost", f"${total_pre_tax:.2f}")
+                else:
+                    st.metric("Services", f"{len([sc for sc in usage_summary.service_costs if sc.cost.amount > 0])}")
+            
+            with col3:
+                total_tax = sum(getattr(sc.cost, 'tax_amount', 0) or 0 for sc in usage_summary.service_costs)
+                if total_tax > 0:
+                    st.metric("Tax Amount", f"${total_tax:.2f}")
+                else:
+                    st.metric("Free Tier", f"{len([sc for sc in usage_summary.service_costs if sc.cost.amount == 0])}")
+            
+            with col4:
+                utilization = usage_summary.budget_info.utilization_percentage
+                st.metric("Budget Used", f"{utilization:.1f}%")
+            
+            st.markdown("---")
+            
+            # Service Breakdown Section
+            st.markdown("### 🔍 Service-by-Service Breakdown")
+            
+            # Filter and sort services
+            paid_services = [sc for sc in usage_summary.service_costs if sc.cost.amount > 0]
+            free_services = [sc for sc in usage_summary.service_costs if sc.cost.amount == 0]
+            
+            paid_services.sort(key=lambda x: x.cost.amount, reverse=True)
+            
+            # Paid Services
+            if paid_services:
+                st.markdown("#### 💳 Paid Services")
+                
+                for service_cost in paid_services:
+                    service_name = getattr(service_cost.cost, 'service_name', service_cost.service_type.value)
+                    amount = service_cost.cost.amount
+                    usage_qty = getattr(service_cost.cost, 'usage_quantity', None)
+                    pre_tax = getattr(service_cost.cost, 'pre_tax_amount', None)
+                    tax = getattr(service_cost.cost, 'tax_amount', None)
+                    
+                    # Create expandable section for each service
+                    with st.expander(f"💳 {service_name} - ${amount:.6f}"):
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.write(f"**Total Cost:** ${amount:.6f}")
+                            if pre_tax and pre_tax != amount:
+                                st.write(f"**Pre-tax:** ${pre_tax:.6f}")
+                            if tax and tax > 0:
+                                st.write(f"**Tax:** ${tax:.6f}")
+                        
+                        with col2:
+                            if usage_qty and usage_qty > 0:
+                                cost_per_unit = amount / usage_qty
+                                st.write(f"**Usage:** {usage_qty:.0f} units")
+                                st.write(f"**Cost per Unit:** ${cost_per_unit:.6f}")
+                            
+                            # Calculate percentage of total
+                            percentage = (amount / usage_summary.budget_info.current_spend) * 100
+                            st.write(f"**% of Total:** {percentage:.1f}%")
+            
+            # Free Tier Services
+            if free_services:
+                st.markdown("#### 💸 Free Tier Services")
+                
+                free_service_names = []
+                for service_cost in free_services:
+                    service_name = getattr(service_cost.cost, 'service_name', service_cost.service_type.value)
+                    usage_qty = getattr(service_cost.cost, 'usage_quantity', None)
+                    
+                    if usage_qty and usage_qty > 0:
+                        free_service_names.append(f"{service_name} ({usage_qty:.0f} units)")
+                    else:
+                        free_service_names.append(service_name)
+                
+                # Show free services in a nice format
+                if free_service_names:
+                    st.success(f"**Free Services:** {', '.join(free_service_names[:5])}")
+                    if len(free_service_names) > 5:
+                        st.info(f"...and {len(free_service_names) - 5} more free services")
+            
+            # Cost Analysis Section
+            st.markdown("---")
+            st.markdown("### 📊 Cost Analysis")
+            
+            if paid_services:
+                # Top cost drivers
+                top_service = paid_services[0]
+                top_percentage = (top_service.cost.amount / usage_summary.budget_info.current_spend) * 100
+                
+                st.info(f"**Top Cost Driver:** {getattr(top_service.cost, 'service_name', top_service.service_type.value)} "
+                       f"(${top_service.cost.amount:.6f} - {top_percentage:.1f}% of total)")
+                
+                # Cost distribution chart
+                if len(paid_services) > 1:
+                    import plotly.express as px
+                    import pandas as pd
+                    
+                    chart_data = []
+                    for sc in paid_services[:10]:  # Top 10 services
+                        service_name = getattr(sc.cost, 'service_name', sc.service_type.value)
+                        chart_data.append({
+                            'Service': service_name[:30],  # Truncate long names
+                            'Cost': sc.cost.amount
+                        })
+                    
+                    df = pd.DataFrame(chart_data)
+                    fig = px.pie(df, values='Cost', names='Service', 
+                               title="Cost Distribution by Service")
+                    fig.update_traces(textposition='inside', textinfo='percent+label')
+                    st.plotly_chart(fig, use_container_width=True)
+        
+        except Exception as e:
+            st.error(f"Error loading detailed usage data: {str(e)}")
+            st.info("Please refresh the page or check your AWS connection.")
         
         try:
             # Get detailed resource information using the new use case
@@ -1328,42 +1482,251 @@ Use the buttons above or ask me directly!""")
                 """)
     
     def render_forecast_tab(self):
-        """Render the Forecast tab content"""
-        st.subheader("Cost Forecasting & Scenarios")
+        """Render the Enhanced Forecast tab with organic growth projections and timeline"""
+        st.subheader("📈 Cost Forecasting & Budget Timeline")
         
-        # Scenario planning
-        st.markdown("### What-If Scenarios")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("**Add Resources:**")
-            new_ec2 = st.number_input("Additional EC2 instances", min_value=0, max_value=10, value=0)
-            storage_gb = st.number_input("Additional storage (GB)", min_value=0, max_value=1000, value=0)
+        try:
+            if not hasattr(st.session_state, 'usage_summary') or st.session_state.usage_summary is None:
+                st.warning("Loading forecast data...")
+                return
             
-        with col2:
-            st.markdown("**Impact:**")
+            usage_summary = st.session_state.usage_summary
             
-            # Use the new scenario analysis use case
-            try:
-                scenario = ScenarioInput(
-                    additional_ec2_instances=new_ec2,
-                    additional_storage_gb=storage_gb
+            # Import forecasting service
+            from src.services.budget_forecasting_service import BudgetForecastingService
+            forecasting_service = BudgetForecastingService()
+            
+            # Generate timeline and projections
+            timeline = forecasting_service.generate_budget_timeline(
+                usage_summary.budget_info, 
+                usage_summary.cost_forecast
+            )
+            projections = forecasting_service.generate_monthly_projections(
+                usage_summary.cost_forecast, 
+                usage_summary.budget_info
+            )
+            
+            # Current Growth Analysis
+            st.markdown("### 📊 Current Growth Analysis")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("Daily Cost", f"${timeline['daily_cost_estimate']:.4f}")
+            
+            with col2:
+                growth_rate = timeline['monthly_growth_rate']
+                delta_color = "normal" if abs(growth_rate) < 10 else "inverse"
+                st.metric("Monthly Growth", f"{growth_rate:.1f}%", delta=f"{growth_rate:.1f}%")
+            
+            with col3:
+                st.metric("Next Month", f"${timeline['monthly_projection']:.2f}")
+            
+            with col4:
+                safe_budget = timeline.get('safe_daily_budget', 0)
+                st.metric("Safe Daily Budget", f"${safe_budget:.4f}")
+            
+            st.markdown("---")
+            
+            # Budget Timeline
+            st.markdown("### ⏰ Budget Timeline")
+            
+            col1, col2 = st.columns(2)
+            
+            # Only show timeline sections if there's actually a risk
+            current_spend = usage_summary.budget_info.current_spend
+            warning_limit = usage_summary.budget_info.warning_limit
+            critical_limit = usage_summary.budget_info.maximum_limit
+            
+            # Check if we're already over limits
+            already_over_warning = current_spend > warning_limit
+            already_over_critical = current_spend > critical_limit
+            
+            # Check if we'll hit limits with current growth
+            will_hit_warning = timeline.get('days_to_warning') and timeline['days_to_warning'] <= 365
+            will_hit_critical = timeline.get('days_to_critical') and timeline['days_to_critical'] <= 365
+            
+            # Only show sections if there's something meaningful to display
+            if already_over_warning or already_over_critical or will_hit_warning or will_hit_critical:
+                
+                col1, col2 = st.columns(2)
+                
+                # Warning Limit Section
+                if already_over_warning or will_hit_warning:
+                    with col1:
+                        st.markdown("#### ⚠️ Warning Limit Status")
+                        
+                        if already_over_warning:
+                            overage = current_spend - warning_limit
+                            st.error(f"🚨 **Over Warning Limit!**")
+                            st.write(f"Current: ${current_spend:.2f}")
+                            st.write(f"Warning Limit: ${warning_limit:.2f}")
+                            st.write(f"**Overage:** ${overage:.2f}")
+                        
+                        elif will_hit_warning:
+                            days = timeline['days_to_warning']
+                            date = timeline['warning_date']
+                            
+                            if days <= 7:
+                                st.error(f"🚨 **{days} days** until warning limit")
+                            elif days <= 30:
+                                st.warning(f"⚠️ **{days} days** until warning limit")
+                            else:
+                                st.info(f"📅 **{days} days** until warning limit")
+                            
+                            st.write(f"**Target:** ${warning_limit:.2f}")
+                            st.write(f"**Date:** {date}")
+                
+                # Critical Limit Section  
+                if already_over_critical or will_hit_critical:
+                    with col2:
+                        st.markdown("#### 🔴 Critical Limit Status")
+                        
+                        if already_over_critical:
+                            overage = current_spend - critical_limit
+                            st.error(f"🔴 **Over Critical Limit!**")
+                            st.write(f"Current: ${current_spend:.2f}")
+                            st.write(f"Critical Limit: ${critical_limit:.2f}")
+                            st.write(f"**Overage:** ${overage:.2f}")
+                        
+                        elif will_hit_critical:
+                            days = timeline['days_to_critical']
+                            date = timeline['critical_date']
+                            
+                            if days <= 7:
+                                st.error(f"🔴 **{days} days** until critical limit")
+                            elif days <= 30:
+                                st.warning(f"⚠️ **{days} days** until critical limit")
+                            else:
+                                st.info(f"📅 **{days} days** until critical limit")
+                            
+                            st.write(f"**Target:** ${critical_limit:.2f}")
+                            st.write(f"**Date:** {date}")
+            
+            else:
+                # Show positive message when everything is good
+                st.success("✅ **Budget Status: Healthy**")
+                st.info(f"💰 Current spending (${current_spend:.2f}) is well within limits. "
+                       f"At current growth rate, no budget concerns expected.")
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    remaining_warning = warning_limit - current_spend
+                    st.metric("Until Warning", f"${remaining_warning:.2f}")
+                with col2:
+                    remaining_critical = critical_limit - current_spend
+                    st.metric("Until Critical", f"${remaining_critical:.2f}")
+                with col3:
+                    utilization = (current_spend / warning_limit) * 100
+                    st.metric("Budget Used", f"{utilization:.1f}%")
+            
+            # Monthly Projections Chart
+            st.markdown("---")
+            st.markdown("### 📅 6-Month Projections")
+            
+            if projections['monthly_projections']:
+                import plotly.graph_objects as go
+                import pandas as pd
+                
+                # Prepare data for chart
+                months = [f"Month +{p['month']}" for p in projections['monthly_projections']]
+                costs = [p['projected_cost'] for p in projections['monthly_projections']]
+                statuses = [p['status'] for p in projections['monthly_projections']]
+                
+                # Create chart
+                fig = go.Figure()
+                
+                # Add cost line
+                fig.add_trace(go.Scatter(
+                    x=months,
+                    y=costs,
+                    mode='lines+markers',
+                    name='Projected Cost',
+                    line=dict(color='blue', width=3),
+                    marker=dict(size=8)
+                ))
+                
+                # Add warning limit line
+                warning_limit = usage_summary.budget_info.warning_limit
+                fig.add_hline(y=warning_limit, line_dash="dash", line_color="orange", 
+                             annotation_text=f"Warning Limit (${warning_limit})")
+                
+                # Add critical limit line
+                critical_limit = usage_summary.budget_info.maximum_limit
+                fig.add_hline(y=critical_limit, line_dash="dash", line_color="red", 
+                             annotation_text=f"Critical Limit (${critical_limit})")
+                
+                fig.update_layout(
+                    title="Cost Projection Timeline",
+                    xaxis_title="Time Period",
+                    yaxis_title="Cost ($)",
+                    height=400
                 )
                 
-                scenario_use_case = self.container.get_use_case('analyze_scenario')
-                result = asyncio.run(scenario_use_case.execute(scenario))
+                st.plotly_chart(fig, use_container_width=True)
                 
-                st.metric("Additional Monthly Cost", f"${result.cost_difference:.2f}")
-                st.metric("New Total", f"${result.projected_monthly_cost:.2f}")
+                # Show projection table
+                col1, col2 = st.columns(2)
                 
-                if result.exceeds_budget:
-                    st.error(f"⚠️ Would exceed budget by ${result.budget_impact:.2f}")
-                else:
-                    st.success("✅ Within budget limits")
+                with col1:
+                    st.markdown("#### 📊 Projection Summary")
+                    for proj in projections['monthly_projections'][:3]:
+                        status_color = {
+                            'HEALTHY': 'success',
+                            'CAUTION': 'warning', 
+                            'WARNING': 'warning',
+                            'CRITICAL': 'error'
+                        }.get(proj['status'], 'info')
+                        
+                        if status_color == 'success':
+                            st.success(f"Month +{proj['month']}: ${proj['projected_cost']:.2f} {proj['status_emoji']}")
+                        elif status_color == 'warning':
+                            st.warning(f"Month +{proj['month']}: ${proj['projected_cost']:.2f} {proj['status_emoji']}")
+                        elif status_color == 'error':
+                            st.error(f"Month +{proj['month']}: ${proj['projected_cost']:.2f} {proj['status_emoji']}")
+                        else:
+                            st.info(f"Month +{proj['month']}: ${proj['projected_cost']:.2f} {proj['status_emoji']}")
                 
-                # Show recommendations
-                if result.recommendations:
+                with col2:
+                    st.markdown("#### 🎯 Recommended Actions")
+                    for action in timeline['recommended_actions'][:4]:
+                        st.write(f"• {action}")
+            
+            # What-If Scenarios Section
+            st.markdown("---")
+            st.markdown("### 🔮 What-If Scenarios")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**Add Resources:**")
+                new_ec2 = st.number_input("Additional EC2 instances", min_value=0, max_value=10, value=0)
+                storage_gb = st.number_input("Additional storage (GB)", min_value=0, max_value=1000, value=0)
+                
+            with col2:
+                st.markdown("**Impact:**")
+                
+                # Use the scenario analysis use case
+                try:
+                    from src.core.models import ScenarioInput
+                    scenario = ScenarioInput(
+                        additional_ec2_instances=new_ec2,
+                        additional_storage_gb=storage_gb
+                    )
+                    
+                    scenario_use_case = self.container.get_use_case('analyze_scenario')
+                    result = asyncio.run(scenario_use_case.execute(scenario))
+                    
+                    st.metric("Additional Monthly Cost", f"${result.cost_difference:.2f}")
+                    st.metric("New Total", f"${result.projected_monthly_cost:.2f}")
+                    
+                    if result.budget_impact > 0:
+                        st.error(f"⚠️ Would exceed budget by ${result.budget_impact:.2f}")
+                    else:
+                        st.success("✅ Within budget limits")
+                    
+                    # Show recommendations
+                    if result.recommendations:
                     st.markdown("**Recommendations:**")
                     for rec in result.recommendations:
                         st.markdown(f"• {rec}")
@@ -1445,6 +1808,47 @@ Use the buttons above or ask me directly!""")
         - Port: {Config.PORT}
         """)
     
+    def render_budget_alerts(self):
+        """Render budget alerts and warnings"""
+        try:
+            from src.services.budget_alert_service import BudgetAlertService
+            
+            if not hasattr(st.session_state, 'usage_summary') or st.session_state.usage_summary is None:
+                return
+            
+            usage_summary = st.session_state.usage_summary
+            alert_service = BudgetAlertService()
+            
+            # Get budget alerts
+            alerts = alert_service.check_budget_status(usage_summary.budget_info)
+            
+            # Display alerts based on severity
+            for alert in alerts:
+                if alert.level == "CRITICAL":
+                    st.error(f"🔴 **CRITICAL BUDGET ALERT**\n\n{alert.message}")
+                elif alert.level == "WARNING":
+                    st.warning(f"🚨 **BUDGET WARNING**\n\n{alert.message}")
+                elif alert.level == "CAUTION":
+                    st.info(f"⚠️ **BUDGET CAUTION**\n\n{alert.message}")
+                # Don't show INFO level alerts to avoid clutter
+            
+            # Show budget dashboard for non-healthy status
+            if usage_summary.budget_info.budget_status != "HEALTHY":
+                with st.expander("📊 Budget Details", expanded=True):
+                    dashboard_text = alert_service.format_budget_dashboard(usage_summary.budget_info)
+                    st.markdown(dashboard_text)
+                    
+                    # Show recommendations
+                    recommendations = alert_service.get_budget_recommendations(usage_summary.budget_info)
+                    if recommendations:
+                        st.markdown("**💡 Immediate Actions:**")
+                        for rec in recommendations[:3]:  # Show top 3 recommendations
+                            st.markdown(f"• {rec}")
+            
+        except Exception as e:
+            # Silently fail to avoid breaking the dashboard
+            pass
+    
     def run(self):
         """Main dashboard runner"""
         # Check if credentials are needed
@@ -1457,7 +1861,7 @@ Use the buttons above or ask me directly!""")
         self.load_data()
         
         # Navigation
-        tab1, tab2, tab3, tab4, tab5 = self.render_navigation()
+        tab1, tab2, tab3, tab4, tab5, tab6 = self.render_navigation()
         
         with tab1:
             self.render_current_usage_tab()
@@ -1466,12 +1870,15 @@ Use the buttons above or ask me directly!""")
             self.render_detailed_usage_tab()
         
         with tab3:
-            self.render_forecast_tab()
+            self.render_detailed_billing_tab()
         
         with tab4:
-            self.render_historical_tab()
+            self.render_forecast_tab()
         
         with tab5:
+            self.render_historical_tab()
+        
+        with tab6:
             self.render_settings_tab()
 
 # Run the dashboard

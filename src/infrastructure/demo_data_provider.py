@@ -16,6 +16,48 @@ class DemoDataProvider:
     """Provides realistic demo data for platform demonstration"""
     
     @staticmethod
+    def get_realistic_usage_summary(budget: float = 15000) -> UsageSummary:
+        """Get realistic usage summary based on actual AWS costs (~$1.72)"""
+        
+        # Realistic service costs based on actual usage
+        service_costs = [
+            ServiceCost(
+                service_type=ServiceType.COST_EXPLORER,
+                cost=CostData(amount=1.70)  # Cost Explorer usage
+            ),
+            ServiceCost(
+                service_type=ServiceType.BEDROCK,
+                cost=CostData(amount=0.02)  # Claude 3 Haiku usage
+            )
+        ]
+        
+        # Realistic budget info
+        current_spend = 1.72
+        budget_info = BudgetInfo(
+            total_budget=budget,
+            current_spend=current_spend
+        )
+        
+        # Realistic forecast (minimal growth)
+        cost_forecast = CostForecast(
+            forecasted_amount=2.15,
+            confidence_level=0.95,
+            forecast_period_days=30,
+            base_amount=current_spend,
+            trend_factor=1.25
+        )
+        
+        return UsageSummary(
+            budget_info=budget_info,
+            service_costs=service_costs,
+            ec2_instances=[],  # No EC2 instances
+            storage_volumes=[],  # No storage volumes
+            database_instances=[],  # No databases
+            cost_forecast=cost_forecast,
+            recommendations=[]
+        )
+    
+    @staticmethod
     def get_demo_usage_summary(budget: float = 15000) -> UsageSummary:
         """Get complete demo usage summary"""
         

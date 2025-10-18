@@ -80,7 +80,11 @@ class AIAssistant:
             
         except Exception as e:
             logger.error(f"Error calling Bedrock: {e}")
-            return self._get_mock_analysis(current_spend, budget, forecast)
+            # Return a clear indication that Bedrock is not available
+            if 'AccessDenied' in str(e) or 'not authorized' in str(e):
+                return "I'm having trouble accessing AWS Bedrock due to permission issues. Please contact your AWS administrator to add bedrock:InvokeModel permission."
+            else:
+                return f"I'm having trouble connecting to AWS Bedrock: {str(e)[:100]}..."
     
     def chat_response(self, user_message, context_data):
         """Handle chat interactions with the AI assistant"""

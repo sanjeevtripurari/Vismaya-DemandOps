@@ -13,6 +13,7 @@ class Config:
     SSO_REGION = os.getenv('SSO_REGION', 'us-east-2')
     SSO_ACCOUNT_ID = os.getenv('SSO_ACCOUNT_ID')
     SSO_ROLE_NAME = os.getenv('SSO_ROLE_NAME')
+    AWS_USER_EMAIL = os.getenv('AWS_USER_EMAIL')
     
     # For AWS deployment or explicit credentials
     AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
@@ -20,7 +21,7 @@ class Config:
     AWS_SESSION_TOKEN = os.getenv('AWS_SESSION_TOKEN')
     
     # Bedrock Configuration
-    BEDROCK_MODEL_ID = os.getenv('BEDROCK_MODEL_ID', 'anthropic.claude-3-sonnet-20240229-v1:0')
+    BEDROCK_MODEL_ID = os.getenv('BEDROCK_MODEL_ID', 'us.anthropic.claude-3-haiku-20240307-v1:0')
     
     # Application Configuration
     DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
@@ -28,7 +29,9 @@ class Config:
     ENVIRONMENT = os.getenv('ENVIRONMENT', 'development')
     
     # Budget Configuration
-    DEFAULT_BUDGET = int(os.getenv('DEFAULT_BUDGET', 15000))
+    DEFAULT_BUDGET = int(os.getenv('DEFAULT_BUDGET', 80))  # Warning threshold
+    BUDGET_WARNING_LIMIT = int(os.getenv('BUDGET_WARNING_LIMIT', 80))  # Warning at $80
+    BUDGET_MAXIMUM_LIMIT = int(os.getenv('BUDGET_MAXIMUM_LIMIT', 100))  # Hard limit at $100
     
     @classmethod
     def is_production(cls):

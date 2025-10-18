@@ -3,6 +3,9 @@
 Test AWS Connection for Vismaya DemandOps
 Quick test to verify AWS credentials and connectivity
 """
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 
 import boto3
 import json
@@ -31,9 +34,14 @@ def test_basic_connection():
         sts = session.client('sts')
         identity = sts.get_caller_identity()
         
+        # Get user display name - prefer email if available
+        user_display = getattr(Config, 'AWS_USER_EMAIL', None)
+        if not user_display:
+            user_display = identity.get('Arn', 'Unknown')
+        
         print("✅ AWS connection successful!")
         print(f"   Account: {identity.get('Account', 'Unknown')}")
-        print(f"   User: {identity.get('Arn', 'Unknown')}")
+        print(f"   User: {user_display}")
         print(f"   Region: {Config.AWS_REGION}")
         
         return session
@@ -74,7 +82,19 @@ def test_cost_explorer(session):
         return True
         
     except Exception as e:
-        print(f"❌ Cost Explorer access failed: {e}")
+        error_str = str(e)
+        
+        # Provide user-friendly error message
+        if 'AccessDenied' in error_str or 'not authorized' in error_str:
+            user_email = getattr(Config, 'AWS_USER_EMAIL', 'your account')
+            print(f"❌ Cost Explorer access denied for {user_email}")
+            print("   💡 Solution: Contact your AWS administrator to add Cost Explorer permissions:")
+            print("      - ce:GetCostAndUsage")
+            print("      - ce:GetUsageReport")
+            print("   📍 Or ensure Cost Explorer is enabled in your AWS account")
+        else:
+            print(f"❌ Cost Explorer access failed: {e}")
+        
         return False
 
 def test_ec2_access(session):
@@ -113,11 +133,22 @@ def test_bedrock_access(session):
         print(f"✅ Bedrock access successful!")
         print(f"   Found {model_count} available models")
         
-        # Check if our specific model is available
+        # Check if our specific model/inference profile is available
         claude_available = any(
             model['modelId'] == Config.BEDROCK_MODEL_ID 
             for model in response.get('modelSummaries', [])
         )
+        
+        # Also check inference profiles if not found in foundation models
+        if not claude_available:
+            try:
+                profiles_response = bedrock_models.list_inference_profiles()
+                claude_available = any(
+                    profile['inferenceProfileId'] == Config.BEDROCK_MODEL_ID
+                    for profile in profiles_response.get('inferenceProfileSummaries', [])
+                )
+            except:
+                pass
         
         if claude_available:
             print(f"   ✅ Claude model ({Config.BEDROCK_MODEL_ID}) is available")
@@ -127,8 +158,20 @@ def test_bedrock_access(session):
         return True
         
     except Exception as e:
-        print(f"❌ Bedrock access failed: {e}")
-        print("   Note: Bedrock may not be available in all regions or accounts")
+        error_str = str(e)
+        
+        # Provide user-friendly error message
+        if 'AccessDenied' in error_str or 'not authorized' in error_str:
+            user_email = getattr(Config, 'AWS_USER_EMAIL', 'your account')
+            print(f"❌ Bedrock access denied for {user_email}")
+            print("   💡 Solution: Contact your AWS administrator to add Bedrock permissions:")
+            print("      - bedrock:ListFoundationModels")
+            print("      - bedrock:InvokeModel")
+            print("   📍 Or check if Bedrock is enabled in your AWS account/region")
+        else:
+            print(f"❌ Bedrock access failed: {e}")
+            print("   Note: Bedrock may not be available in all regions or accounts")
+        
         return False
 
 def main():
