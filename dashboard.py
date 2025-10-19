@@ -17,7 +17,7 @@ from config import Config
 st.set_page_config(
     page_title="Vismaya - DemandOps",
     page_icon="📊",
-    layout="centered",
+    layout="wide",
     initial_sidebar_state="collapsed"
 )
 
@@ -26,13 +26,53 @@ st.markdown("""
 <style>
     /* Main container adjustments - optimized for full screen usage */
     .main .block-container {
-        max-width: 1400px;
+        max-width: 100%;
         padding-top: 0.5rem;
-        padding-left: 1rem;
-        padding-right: 1rem;
+        padding-left: 2rem;
+        padding-right: 2rem;
         padding-bottom: 0.5rem;
         margin: 0 auto;
         min-height: 95vh;
+    }
+    
+    /* Hide data-testid attributes */
+    [data-testid] {
+        border: none !important;
+    }
+    
+    /* Remove testid visual indicators */
+    [data-testid]:before {
+        display: none !important;
+    }
+    
+    /* Form button styling for better alignment */
+    .stForm {
+        border: none !important;
+    }
+    
+    .stForm > div {
+        gap: 0.5rem !important;
+    }
+    
+    .stForm button {
+        height: 38px !important;
+        font-size: 14px !important;
+        border-radius: 6px !important;
+        border: 1px solid #ddd !important;
+        transition: all 0.2s ease !important;
+    }
+    
+    .stForm button:hover {
+        transform: translateY(-1px) !important;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
+    }
+    
+    /* Responsive button layout */
+    @media (max-width: 768px) {
+        .stForm button {
+            font-size: 12px !important;
+            padding: 0.25rem 0.5rem !important;
+        }
     }
     
     /* Header styling - more compact */
@@ -568,52 +608,45 @@ class VismayaDashboard:
         self.repository = SQLiteRepository()
         
     def load_data(self):
-        """Load AWS cost and usage data - Production Ready"""
-        if 'data_loaded' not in st.session_state or st.button("🔄 Refresh Data"):
-            with st.spinner("Loading real AWS data..."):
+        """Load AWS cost and usage data from SQLite first, no loading screens"""
+        
+        if 'data_loaded' not in st.session_state:
+            # Always load from SQLite first for instant UI
+            try:
+                # Try to get today's cached data
+                today = datetime.now()
+                cached_summary = asyncio.run(self.repository.get_usage_summary(today))
+                
+                if cached_summary:
+                    # Use cached data immediately
+                    st.session_state.usage_summary = cached_summary
+                    st.session_state.data_loaded = True
+                    st.session_state.last_refresh = cached_summary.last_updated
+                else:
+                    # Try to get any recent cached data (within last 7 days)
+                    historical_summaries = asyncio.run(self.repository.get_historical_summaries(7))
+                    if historical_summaries:
+                        latest_summary = historical_summaries[0]
+                        st.session_state.usage_summary = latest_summary
+                        st.session_state.data_loaded = True
+                        st.session_state.last_refresh = latest_summary.last_updated
+                    else:
+                        # Load default empty data as last resort
+                        default_summary = asyncio.run(self.repository.get_default_usage_summary())
+                        st.session_state.usage_summary = default_summary
+                        st.session_state.data_loaded = True
+                        st.session_state.last_refresh = datetime.now()
+                        
+            except Exception as e:
+                logger.warning(f"Could not load any data: {e}")
+                # Load default empty data as fallback
                 try:
-                    # Log deployment environment for debugging
-                    from src.infrastructure.error_handler import AWSErrorHandler
-                    deployment_context = AWSErrorHandler.log_deployment_info()
-                    
-                    # Use the new use case pattern
-                    usage_summary_use_case = self.container.get_use_case('get_usage_summary')
-                    usage_summary = asyncio.run(usage_summary_use_case.execute())
-                    
-                    # Save to database
-                    asyncio.run(self.repository.save_usage_summary(usage_summary))
-                    
-                    st.session_state.usage_summary = usage_summary
+                    default_summary = asyncio.run(self.repository.get_default_usage_summary())
+                    st.session_state.usage_summary = default_summary
                     st.session_state.data_loaded = True
                     st.session_state.last_refresh = datetime.now()
-                    st.session_state.error_message = None
-                    
-                    st.success(f"✅ Real AWS data loaded successfully (${usage_summary.budget_info.current_spend:.2f})")
-                    
-                except Exception as e:
-                    error_message = str(e)
-                    st.session_state.error_message = error_message
-                    st.session_state.data_loaded = False
-                    
-                    # Show clear error message
-                    st.error(f"❌ Cannot load AWS data: {error_message}")
-                    
-                    # Show deployment context for debugging
-                    with st.expander("🔧 Troubleshooting Information"):
-                        st.write("**Deployment Environment:**")
-                        st.json(deployment_context)
-                        
-                        st.write("**Common Solutions:**")
-                        if deployment_context['environment'] == 'local':
-                            st.write("- Check your AWS credentials in .env file")
-                            st.write("- Run: `aws sts get-caller-identity` to test credentials")
-                            st.write("- Ensure Cost Explorer is enabled in your AWS account")
-                        else:
-                            st.write("- Ensure IAM role has Cost Explorer permissions")
-                            st.write("- Check security groups allow outbound HTTPS")
-                            st.write("- Verify AWS region is correct")
-                    
-                    # Don't try to load cached data - show real error instead
+                except Exception as fallback_error:
+                    logger.error(f"Could not load default data: {fallback_error}")
                     st.session_state.data_loaded = False
     
     def calculate_metrics(self):
@@ -622,19 +655,24 @@ class VismayaDashboard:
             usage_summary = st.session_state.usage_summary
             budget_info = usage_summary.budget_info
             
+            # Handle empty/default data gracefully
+            current_spend = budget_info.current_spend if budget_info.current_spend is not None else 0.0
+            forecast_amount = usage_summary.cost_forecast.forecasted_amount if usage_summary.cost_forecast.forecasted_amount is not None else 0.0
+            trend_factor = usage_summary.cost_forecast.trend_factor if usage_summary.cost_forecast.trend_factor is not None else 1.0
+            
             return {
-                'current_spend': budget_info.current_spend,
-                'budget': budget_info.total_budget,
+                'current_spend': current_spend,
+                'budget': budget_info.warning_limit or Config.BUDGET_WARNING_LIMIT,
                 'budget_pct': budget_info.utilization_percentage,
-                'forecast': usage_summary.cost_forecast.forecasted_amount,
-                'trending': 'up' if usage_summary.cost_forecast.trend_factor > 1.0 else 'down',
+                'forecast': forecast_amount,
+                'trending': 'up' if trend_factor > 1.0 else 'stable' if trend_factor == 1.0 else 'down',
                 'has_resources': len(usage_summary.ec2_instances) > 0 or len(usage_summary.storage_volumes) > 0 or len(usage_summary.database_instances) > 0
             }
         else:
             # Fallback data - simulate no resources scenario
             return {
                 'current_spend': 0.00,  # No spend if no resources
-                'budget': Config.DEFAULT_BUDGET,
+                'budget': Config.BUDGET_WARNING_LIMIT,
                 'budget_pct': 0.0,
                 'forecast': 0.00,
                 'trending': 'stable',
@@ -825,41 +863,11 @@ class VismayaDashboard:
         st.markdown('</div>', unsafe_allow_html=True)
     
     def render_ai_assistant(self, metrics):
-        """Render AI assistant section matching the original design"""
+        """Render AI assistant section with input first, then response"""
         
-        # Agent Response section
-        st.markdown("### Agent Response:")
-        
-        # Get AI analysis
-        try:
-            cost_insights_use_case = self.container.get_use_case('get_cost_insights')
-            analysis = asyncio.run(cost_insights_use_case.execute())
-        except Exception as e:
-            # Fallback analysis matching the design
-            budget_pct = metrics['budget_pct']
-            overspend = metrics['forecast'] - metrics['budget']
-            
-            if budget_pct > 80:
-                analysis = f"""You have spent ${metrics['current_spend']:,.0f} of ${metrics['budget']:,.0f} budget ({budget_pct:.0f}%).
-
-At this rate, you'll overshoot by ${overspend:,.0f}.
-
-Suggested:
-Move 3 EC2 to Spot → Save $120.
-Optimize RDS storage → Save $200.
-Review unused EBS volumes → Save $150."""
-            else:
-                analysis = f"""You're at {budget_pct:.0f}% of your ${metrics['budget']:,.0f} budget. Good progress!
-
-Recommendations:
-• Monitor EC2 usage patterns
-• Consider Reserved Instances for steady workloads
-• Set up cost alerts at 90% budget"""
-        
-        st.markdown(f'<div class="suggestion-box">{analysis}</div>', unsafe_allow_html=True)
-        
-        # AI Assistant Chat Box
-        st.markdown("### AI Assistant Box")
+        # Initialize chat history
+        if 'chat_history' not in st.session_state:
+            st.session_state.chat_history = []
         
         # Show data context indicator
         try:
@@ -877,115 +885,173 @@ Recommendations:
         except Exception:
             st.info("🔵 Using available data")
         
-        # Create a more compact chat interface
-        with st.container():
-            # Initialize chat history
-            if 'chat_history' not in st.session_state:
-                st.session_state.chat_history = []
+        # AI Assistant Chat Input Section - NOW AT TOP
+        st.markdown("### 💬 Ask AI Assistant")
+        
+        # Chat input form with horizontal buttons
+        with st.form("chat_form", clear_on_submit=True):
+            user_input = st.text_input(
+                "", 
+                placeholder="Ask about your AWS costs, optimization opportunities, or any questions...",
+                key="chat_input_form"
+            )
             
-            # Quick action buttons - more compact
-            col1, col2 = st.columns(2)
+            # Horizontal button layout with proper spacing
+            col1, col2, col3, col4, col5 = st.columns([2, 1.5, 1.5, 1.5, 1])
             with col1:
-                if st.button("💰 Costs", key="quick_costs", help="Current AWS costs"):
-                    st.session_state.pending_question = "What are my current AWS costs?"
-                    st.rerun()
-                if st.button("🔧 Optimize", key="quick_optimize", help="Optimization tips"):
-                    st.session_state.pending_question = "How can I optimize my AWS costs?"
-                    st.rerun()
+                submitted = st.form_submit_button("Send", type="primary", use_container_width=True)
             with col2:
-                if st.button("📊 Services", key="quick_services", help="Top services by cost"):
-                    st.session_state.pending_question = "Which AWS services cost the most?"
-                    st.rerun()
-                if st.button("📈 Forecast", key="quick_forecast", help="Cost forecast"):
-                    st.session_state.pending_question = "What's my cost forecast?"
-                    st.rerun()
+                clear_chat = st.form_submit_button("🗑️ Clear", use_container_width=True)
+            with col3:
+                scroll_chat = st.form_submit_button("📜 Scroll", use_container_width=True)
+            with col4:
+                refresh_data = st.form_submit_button("🔄 Refresh", use_container_width=True)
+            with col5:
+                st.write("")  # Empty space for balance
             
-            # Handle pending questions from quick buttons
-            if 'pending_question' in st.session_state:
-                user_input = st.session_state.pending_question
-                del st.session_state.pending_question
-                
-                # Process the pending question immediately
-                with st.spinner("Analyzing your AWS data..."):
-                    try:
-                        chat_use_case = self.container.get_use_case('handle_chat')
-                        response = asyncio.run(chat_use_case.execute(user_input))
-                    except Exception as e:
-                        response = f"I'm having trouble accessing your AWS data. Error: {str(e)[:100]}... Please check your AWS connection and try again."
-                
-                # Add to chat history
-                st.session_state.chat_history.append({
-                    'user': user_input,
-                    'assistant': response,
-                    'timestamp': datetime.now()
-                })
+        # Handle form submissions outside the form to prevent blocking
+        if submitted and user_input and user_input.strip():
+            # Add user message immediately to show responsiveness
+            st.session_state.chat_history.append({
+                'user': user_input,
+                'assistant': "🤖 Processing your question...",
+                'timestamp': datetime.now(),
+                'processing': True
+            })
             
-            # Chat input with form to handle submission properly
-            with st.form("chat_form", clear_on_submit=True):
-                user_input = st.text_input(
-                    "Ask about your AWS costs...", 
-                    placeholder="Try: 'What's my EC2 spending?' or 'Show me optimization opportunities'",
-                    key="chat_input_form"
-                )
-                submitted = st.form_submit_button("Send", type="primary")
+            # Store the question for background processing
+            st.session_state.pending_chat_question = user_input
+            st.rerun()
+        
+        elif clear_chat:
+            st.session_state.chat_history = []
+            st.rerun()
+        
+        elif scroll_chat:
+            # Scroll to bottom of chat (handled by UI automatically)
+            st.rerun()
+        
+        elif refresh_data:
+            # Set flag for background refresh
+            st.session_state.refresh_requested = True
+            st.rerun()
+        
+        # Process pending chat question in background
+        if 'pending_chat_question' in st.session_state:
+            question = st.session_state.pending_chat_question
+            del st.session_state.pending_chat_question
+            
+            try:
+                # Process the question
+                chat_use_case = self.container.get_use_case('handle_chat')
+                response = asyncio.run(chat_use_case.execute(question))
                 
-                if submitted and user_input and user_input.strip():
-                    # Show loading indicator
-                    with st.spinner("Analyzing your AWS data..."):
-                        try:
-                            chat_use_case = self.container.get_use_case('handle_chat')
-                            response = asyncio.run(chat_use_case.execute(user_input))
-                        except Exception as e:
-                            response = f"I'm having trouble accessing your AWS data. Error: {str(e)[:100]}... Please check your AWS connection and try again."
+                # Update the last message with the actual response
+                if st.session_state.chat_history and st.session_state.chat_history[-1].get('processing'):
+                    st.session_state.chat_history[-1]['assistant'] = response
+                    st.session_state.chat_history[-1]['processing'] = False
+                
+            except Exception as e:
+                response = f"I'm having trouble accessing your AWS data. Error: {str(e)[:100]}... Please check your AWS connection and try again."
+                
+                # Update the last message with error
+                if st.session_state.chat_history and st.session_state.chat_history[-1].get('processing'):
+                    st.session_state.chat_history[-1]['assistant'] = response
+                    st.session_state.chat_history[-1]['processing'] = False
+            
+            st.rerun()
+        
+        # Process background data refresh
+        if st.session_state.get('refresh_requested', False):
+            st.session_state.refresh_requested = False
+            
+            try:
+                # Use the new use case pattern
+                usage_summary_use_case = self.container.get_use_case('get_usage_summary')
+                usage_summary = asyncio.run(usage_summary_use_case.execute())
+                
+                # Save to database
+                asyncio.run(self.repository.save_usage_summary(usage_summary))
+                
+                # Update session state with fresh data
+                st.session_state.usage_summary = usage_summary
+                st.session_state.last_refresh = datetime.now()
+                
+                st.success("🟢 Data refreshed successfully!")
+            except Exception as e:
+                st.error(f"Failed to refresh data: {str(e)[:100]}...")
+            
+            st.rerun()
+        
+        # Agent Response section - NOW AT BOTTOM
+        st.markdown("---")
+        st.markdown("### 🤖 Agent Response")
+        
+        # Determine what to show in Agent Response
+        if st.session_state.chat_history:
+            # Show chat history when user has asked questions
+            with st.container():
+                st.markdown("""
+                <div style="background-color: #ffffff; border: 2px solid #e0e0e0; border-radius: 10px; padding: 20px; max-height: 400px; overflow-y: auto; margin: 10px 0;">
+                """, unsafe_allow_html=True)
+                
+                # Show all chat exchanges with clean formatting
+                for i, chat in enumerate(st.session_state.chat_history):
+                    st.markdown(f"**💬 You:** {chat['user']}")
                     
-                    # Add to chat history
-                    st.session_state.chat_history.append({
-                        'user': user_input,
-                        'assistant': response,
-                        'timestamp': datetime.now()
-                    })
+                    # Show processing indicator or response
+                    if chat.get('processing', False):
+                        st.markdown("**🤖 Vismaya:** 🔄 Processing your question...")
+                    else:
+                        st.markdown(f"**🤖 Vismaya:** {chat['assistant']}")
                     
-                    # Rerun to show the new message
-                    st.rerun()
-            
-            # Display chat history in a styled container
-            if st.session_state.chat_history:
-                st.markdown('<div class="chat-container">', unsafe_allow_html=True)
-                
-                # Show last 2 exchanges to keep it compact
-                for i, chat in enumerate(st.session_state.chat_history[-2:]):
-                    st.markdown(f"**You:** {chat['user']}")
-                    st.markdown(f"**Vismaya:** {chat['assistant']}")
-                    if i < len(st.session_state.chat_history[-2:]) - 1:
+                    # Add separator between conversations
+                    if i < len(st.session_state.chat_history) - 1:
                         st.markdown("---")
                 
-                st.markdown('</div>', unsafe_allow_html=True)
+                st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            # Show default cost summary when no questions asked
+            try:
+                cost_insights_use_case = self.container.get_use_case('get_cost_insights')
+                analysis = asyncio.run(cost_insights_use_case.execute())
+            except Exception as e:
+                # Fallback analysis based on current metrics
+                budget_pct = metrics['budget_pct']
+                current_spend = metrics['current_spend']
+                budget = metrics['budget']
+                forecast = metrics['forecast']
                 
-                # Action buttons
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("🗑️ Clear Chat", key="clear_chat"):
-                        st.session_state.chat_history = []
-                        st.rerun()
-                with col2:
-                    if st.button("🔄 Refresh Data", key="refresh_data"):
-                        # Force refresh of usage data
-                        if 'data_loaded' in st.session_state:
-                            del st.session_state.data_loaded
-                        st.rerun()
-            else:
-                # Show welcome message with examples - more compact
-                st.markdown('<div class="chat-container">', unsafe_allow_html=True)
-                st.markdown("""**Vismaya:** Hi! I'm your AI FinOps assistant.
+                if current_spend == 0:
+                    analysis = f"""Welcome to Vismaya DemandOps! 
 
-**Quick questions:**
-• Current spending & budget status
-• Service costs & optimization tips
-• EC2, RDS, S3 usage details
-• Cost forecasts & recommendations
+Your current AWS spending is $0.00 with a budget limit of ${budget:.0f}.
 
-Use the buttons above or ask me directly!""")
-                st.markdown('</div>', unsafe_allow_html=True)
+Getting Started:
+• Your dashboard is loading with default values
+• Real AWS data will populate automatically
+• Set up cost monitoring and alerts
+• Explore optimization opportunities"""
+                elif budget_pct > 80:
+                    overspend = forecast - budget
+                    analysis = f"""You have spent ${current_spend:,.2f} of ${budget:,.0f} budget ({budget_pct:.1f}%).
+
+At this rate, you'll overshoot by ${overspend:,.2f}.
+
+Suggested Actions:
+• Review current AWS usage immediately
+• Consider cost optimization strategies
+• Set up budget alerts for monitoring"""
+                else:
+                    analysis = f"""You're at {budget_pct:.1f}% of your ${budget:,.0f} budget. Good progress!
+
+Recommendations:
+• Monitor spending patterns regularly
+• Consider Reserved Instances for steady workloads
+• Set up proactive cost alerts"""
+            
+            # Display default analysis without white block
+            st.markdown(f"**🤖 Vismaya:** {analysis}")
     
     def render_current_usage_tab(self):
         """Render the Current Usage tab content"""
@@ -1727,36 +1793,40 @@ Use the buttons above or ask me directly!""")
                     
                     # Show recommendations
                     if result.recommendations:
-                    st.markdown("**Recommendations:**")
-                    for rec in result.recommendations:
-                        st.markdown(f"• {rec}")
+                        st.markdown("**Recommendations:**")
+                        for rec in result.recommendations:
+                            st.markdown(f"• {rec}")
                         
-            except Exception as e:
-                st.error(f"Error analyzing scenario: {e}")
-        
-        # Forecast chart
-        st.markdown("### 6-Month Forecast")
-        
-        # Calculate additional cost from the scenario inputs
-        additional_cost = (new_ec2 * 120) + (storage_gb * 0.10)
-        
-        months = ['Current', 'Month+1', 'Month+2', 'Month+3', 'Month+4', 'Month+5', 'Month+6']
-        baseline = [12500, 13200, 13800, 14500, 15200, 15800, 16500]
-        with_changes = [12500 + additional_cost] * 7
-        
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=months, y=baseline, name='Baseline Forecast', line=dict(color='blue')))
-        fig.add_trace(go.Scatter(x=months, y=with_changes, name='With Changes', line=dict(color='red', dash='dash')))
-        fig.add_hline(y=Config.DEFAULT_BUDGET, line_dash="dot", line_color="green", annotation_text="Budget Limit")
-        
-        fig.update_layout(
-            title="Cost Forecast Comparison",
-            xaxis_title="Time Period",
-            yaxis_title="Cost ($)",
-            height=400
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
+                except Exception as e:
+                    st.error(f"Error analyzing scenario: {e}")
+            
+            # Forecast chart
+            st.markdown("### 6-Month Forecast")
+            
+            # Calculate additional cost from the scenario inputs
+            additional_cost = (new_ec2 * 120) + (storage_gb * 0.10)
+            
+            months = ['Current', 'Month+1', 'Month+2', 'Month+3', 'Month+4', 'Month+5', 'Month+6']
+            baseline = [12500, 13200, 13800, 14500, 15200, 15800, 16500]
+            with_changes = [12500 + additional_cost] * 7
+            
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=months, y=baseline, name='Baseline Forecast', line=dict(color='blue')))
+            fig.add_trace(go.Scatter(x=months, y=with_changes, name='With Changes', line=dict(color='red', dash='dash')))
+            fig.add_hline(y=Config.DEFAULT_BUDGET, line_dash="dot", line_color="green", annotation_text="Budget Limit")
+            
+            fig.update_layout(
+                title="Cost Forecast Comparison",
+                xaxis_title="Time Period",
+                yaxis_title="Cost ($)",
+                height=400
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+        except Exception as e:
+            st.error(f"Error loading forecast data: {e}")
+            st.info("Please refresh the page or check your AWS connection.")
     
     def render_historical_tab(self):
         """Render the Historical Data tab content"""
@@ -1780,10 +1850,10 @@ Use the buttons above or ask me directly!""")
         with col1:
             st.markdown("### Budget Configuration")
             new_budget = st.number_input("Monthly Budget ($)", 
-                                       min_value=100, 
+                                       min_value=10, 
                                        max_value=100000, 
                                        value=Config.DEFAULT_BUDGET,
-                                       step=100)
+                                       step=10)
             
             if st.button("Update Budget"):
                 st.success(f"Budget updated to ${new_budget:,}")

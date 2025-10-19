@@ -142,8 +142,7 @@ class DependencyContainer:
             )
             
             self._services['analyze_scenario_use_case'] = AnalyzeScenarioUseCase(
-                self._services['resource_service'],
-                self._config.DEFAULT_BUDGET
+                self._services['resource_service']
             )
             
             self._services['get_cost_insights_use_case'] = GetCostInsightsUseCase(

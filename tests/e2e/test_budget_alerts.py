@@ -51,10 +51,12 @@ async def test_budget_alerts():
         print("-" * 30)
         
         # Create budget info for scenario
+        from config import Config
         budget_info = BudgetInfo(
-            total_budget=80.0,  # Warning limit
+            total_budget=Config.BUDGET_WARNING_LIMIT,  # Warning limit
             current_spend=scenario['current_spend'],
-            warning_limit=80.0,
+            warning_limit=Config.BUDGET_WARNING_LIMIT,
+            maximum_limit=Config.BUDGET_MAXIMUM_LIMIT
             maximum_limit=100.0
         )
         

@@ -247,6 +247,11 @@ class SQLiteRepository(IDataRepository):
             logger.error(f"Error getting usage summary: {e}")
             return None
     
+    async def get_default_usage_summary(self) -> UsageSummary:
+        """Get default empty usage summary for initial UI load"""
+        from ..infrastructure.demo_data_provider import DemoDataProvider
+        return DemoDataProvider.get_empty_usage_summary()
+    
     async def get_historical_summaries(self, days: int = 30) -> List[UsageSummary]:
         """Get historical usage summaries"""
         try:

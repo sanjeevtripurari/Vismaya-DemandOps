@@ -106,10 +106,10 @@ class AnalyzeScenarioUseCase:
     """Use case for analyzing what-if scenarios"""
     
     def __init__(self, 
-                 resource_service: ResourceManagementService,
-                 default_budget: float = 15000):
+                 resource_service: ResourceManagementService):
+        from config import Config
         self._resource_service = resource_service
-        self._default_budget = default_budget
+        self._default_budget = Config.BUDGET_WARNING_LIMIT
     
     async def execute(self, scenario: ScenarioInput) -> ScenarioResult:
         """Execute scenario analysis"""

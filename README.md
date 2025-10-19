@@ -26,6 +26,18 @@ Vismaya DemandOps is an intelligent platform that helps you understand and contr
 - **Small Teams** needing simple cost monitoring
 - **Anyone** wanting to avoid surprise AWS bills
 
+## 🔧 Virtual Environment Consistency
+
+**Vismaya DemandOps maintains consistent virtual environment usage across all deployment methods:**
+
+- ✅ **Local Development**: Uses Python virtual environment (`venv/`)
+- ✅ **Docker Containers**: Creates and uses virtual environment (`/opt/venv/` + `venv/`)
+- ✅ **AWS EC2 Deployment**: Maintains virtual environment in containers
+- ✅ **Consistent Dependencies**: Same `requirements.txt` across all environments
+- ✅ **Isolated Execution**: All Python packages properly isolated
+
+This ensures consistent behavior whether you're running locally, in Docker, or on AWS.
+
 ---
 
 ## 🖥️ What You'll See
@@ -363,6 +375,6 @@ This comprehensive deployment guide ensures your Vismaya DemandOps application r
 ### Our Mission
 To democratize cloud cost optimization through intelligent AI-powered solutions that make FinOps accessible to organizations of all sizes.
 
-## License
+## 📄 License
 
 MIT License - Built for AWS SuperHack 2025 by **Team MaximAI**

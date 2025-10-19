@@ -13,6 +13,7 @@ import os
 import logging
 import asyncio
 import socket
+from pathlib import Path
 from config import Config
 
 # Setup logging
@@ -199,6 +200,11 @@ def run_dashboard():
 
 def check_virtual_environment():
     """Check if virtual environment is activated or available"""
+    # Check if we're running in Docker (skip venv check)
+    if os.path.exists('/.dockerenv') or os.environ.get('DOCKER_CONTAINER'):
+        print("🐳 Running in Docker container - virtual environment not required")
+        return True
+    
     in_venv = hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix)
     
     if in_venv:
@@ -228,7 +234,6 @@ def check_virtual_environment():
     
     # Try to setup virtual environment
     try:
-        from pathlib import Path
         if Path("venv-manager.py").exists():
             subprocess.run([sys.executable, "venv-manager.py", "setup"])
             print("🔄 Please run the application again")

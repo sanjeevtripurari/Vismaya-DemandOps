@@ -1,589 +1,533 @@
-# 🐳 Vismaya DemandOps - Docker Deployment
+# 🐳 Vismaya DemandOps - Docker Deployment Guide
 
-**Complete Docker containerization for AWS cost management platform**
+**AI-Powered FinOps Platform - Complete Docker containerization with consistent virtual environment management**
 
-## 📁 Docker Files Overview
+## 🎯 Virtual Environment Consistency
 
-```
-docker/
-├── Dockerfile              # Multi-stage production container
-├── docker-compose.yml      # Complete orchestration setup
-├── docker-deploy.sh        # Automated deployment script
-├── .dockerignore           # Optimized build context
-├── docker-compose.dev.yml  # Development environment
-├── docker-compose.prod.yml # Production environment
-└── README.md               # This comprehensive guide
-```
+**Vismaya DemandOps maintains consistent virtual environment usage across all deployment methods:**
 
-## 🚀 Quick Start
+- ✅ **Local Development**: Uses Python virtual environment (`venv/`)
+- ✅ **Docker Containers**: Creates and uses virtual environment (`/opt/venv/` + `venv/`)
+- ✅ **AWS EC2 Deployment**: Maintains virtual environment in containers
+- ✅ **Consistent Dependencies**: Same `requirements.txt` across all environments
 
-### Prerequisites
-- Docker 20.10+ and Docker Compose 2.0+ (Linux/Mac/Windows)
-- AWS credentials configured
-- 2GB available RAM
-- 1GB available disk space
-- Git (for cloning repository)
+## 📋 Prerequisites
 
-### 🎯 One-Command Deployment
+- **Docker**: 20.10+ and Docker Compose 2.0+
+- **System Requirements**: 2GB RAM, 1GB disk space
+- **AWS Account**: With appropriate permissions for Cost Explorer, Bedrock, EC2
+- **Git**: For repository cloning
+- **Python**: 3.11+ (for local development consistency)
 
-#### **Automated Setup (Recommended)**
+## 🚀 Deployment Options
+
+### Option 1: Local Development (Recommended for Testing)
+### Option 2: AWS EC2 Instance (Production Deployment)
+
+---
+
+## 🏠 Local Development Deployment
+
+**Perfect for development, testing, and local demonstrations with consistent virtual environment**
+
+### Step 1: Clone and Setup
 ```bash
-# Clone repository
+# Clone the repository
 git clone https://github.com/sanjeevtripurari/Vismaya-DemandOps.git
 cd Vismaya-DemandOps/docker
 
-# Linux/Mac:
-chmod +x start.sh && ./start.sh
-
-# Windows (Command Prompt):
-start.bat
-
-# Windows (PowerShell/Git Bash):
-bash start.sh
+# Copy environment template
+cp ../.env.example .env
 ```
 
-#### **Manual Setup**
-```bash
-# Clone and start (works on all platforms)
-git clone https://github.com/sanjeevtripurari/Vismaya-DemandOps.git
-cd Vismaya-DemandOps
-cp .env.example .env  # Edit with your AWS credentials
-docker-compose -f docker/docker-compose.yml up -d
-
-# Visit http://localhost:8501 in your browser
-```
-
-## 📋 Docker Configuration Files
-
-### 🐳 **Dockerfile** - Production Container
-
-**Multi-stage build for optimized production deployment:**
-
-```dockerfile
-# Stage 1: Build environment
-FROM python:3.11-slim as builder
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Stage 2: Production runtime
-FROM python:3.11-slim
-WORKDIR /app
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy application code
-COPY . .
-COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
-
-# Create non-root user for security
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
-USER appuser
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8501/_stcore/health || exit 1
-
-# Expose port
-EXPOSE 8501
-
-# Run application
-CMD ["python", "app.py"]
-```
-
-**Key Features:**
-- ✅ **Multi-stage build** for smaller image size
-- ✅ **Security hardened** with non-root user
-- ✅ **Health checks** for container monitoring
-- ✅ **Optimized layers** for faster builds
-- ✅ **Production ready** with proper signal handling
-
----
-
-### 🎼 **docker-compose.yml** - Complete Orchestration
-
-**Full-featured Docker Compose setup:**
-
-```yaml
-version: '3.8'
-
-services:
-  vismaya:
-    build: 
-      context: ..
-      dockerfile: docker/Dockerfile
-    container_name: vismaya-demandops
-    ports:
-      - "8501:8501"
-    environment:
-      - AWS_REGION=${AWS_REGION:-us-east-2}
-      - ENVIRONMENT=production
-      - DEBUG=false
-      - PORT=8501
-      - BEDROCK_MODEL_ID=${BEDROCK_MODEL_ID:-us.anthropic.claude-3-haiku-20240307-v1:0}
-      - DEFAULT_BUDGET=${DEFAULT_BUDGET:-80}
-      - BUDGET_WARNING_LIMIT=${BUDGET_WARNING_LIMIT:-80}
-      - BUDGET_MAXIMUM_LIMIT=${BUDGET_MAXIMUM_LIMIT:-100}
-    env_file:
-      - ../.env
-    volumes:
-      - ../logs:/app/logs
-      - ~/.aws:/home/appuser/.aws:ro  # AWS credentials
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    networks:
-      - vismaya-network
-
-  # Optional: Add monitoring
-  watchtower:
-    image: containrrr/watchtower
-    container_name: vismaya-watchtower
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      - WATCHTOWER_CLEANUP=true
-      - WATCHTOWER_POLL_INTERVAL=3600
-    restart: unless-stopped
-    profiles: ["monitoring"]
-
-networks:
-  vismaya-network:
-    driver: bridge
-
-volumes:
-  vismaya-logs:
-    driver: local
-```
-
-**Key Features:**
-- ✅ **Environment management** with .env file support
-- ✅ **Volume mounting** for logs and AWS credentials
-- ✅ **Health monitoring** with automatic restarts
-- ✅ **Network isolation** for security
-- ✅ **Optional monitoring** with Watchtower
-- ✅ **Production configuration** with proper resource limits
-
----
-
-### 🚀 **docker-deploy.sh** - Automated Deployment
-
-**One-click deployment script:**
+### Step 2: Configure AWS Credentials
+Edit the `.env` file with your AWS credentials:
 
 ```bash
-#!/bin/bash
-# Automated Docker deployment with health checks and rollback
+# Required AWS Configuration
+AWS_REGION=us-east-2
+AWS_ACCESS_KEY_ID=your_access_key_here
+AWS_SECRET_ACCESS_KEY=your_secret_key_here
+AWS_SESSION_TOKEN=your_session_token_here  # If using temporary credentials
 
-set -e
-
-# Configuration
-IMAGE_NAME="vismaya-demandops"
-CONTAINER_NAME="vismaya-demandops"
-HEALTH_CHECK_URL="http://localhost:8501/_stcore/health"
-MAX_WAIT_TIME=120
-
-echo "🐳 Starting Vismaya DemandOps Docker Deployment"
-
-# Pre-deployment checks
-check_prerequisites() {
-    echo "🔍 Checking prerequisites..."
-    
-    # Check Docker
-    if ! command -v docker &> /dev/null; then
-        echo "❌ Docker not found. Please install Docker."
-        exit 1
-    fi
-    
-    # Check Docker Compose
-    if ! command -v docker-compose &> /dev/null; then
-        echo "❌ Docker Compose not found. Please install Docker Compose."
-        exit 1
-    fi
-    
-    # Check .env file
-    if [ ! -f "../.env" ]; then
-        echo "⚠️ .env file not found. Copying from .env.example"
-        cp ../.env.example ../.env
-        echo "📝 Please edit .env with your AWS credentials before continuing."
-        read -p "Press Enter when ready..."
-    fi
-    
-    echo "✅ Prerequisites check passed"
-}
-
-# Build and deploy
-deploy() {
-    echo "🏗️ Building Docker image..."
-    docker-compose build --no-cache
-    
-    echo "🚀 Starting services..."
-    docker-compose up -d
-    
-    echo "⏳ Waiting for application to be healthy..."
-    wait_for_health
-    
-    echo "✅ Deployment completed successfully!"
-    echo "🌐 Application available at: http://localhost:8501"
-}
-
-# Health check with timeout
-wait_for_health() {
-    local elapsed=0
-    while [ $elapsed -lt $MAX_WAIT_TIME ]; do
-        if curl -f $HEALTH_CHECK_URL &> /dev/null; then
-            echo "✅ Application is healthy"
-            return 0
-        fi
-        
-        echo "⏳ Waiting for application... (${elapsed}s/${MAX_WAIT_TIME}s)"
-        sleep 5
-        elapsed=$((elapsed + 5))
-    done
-    
-    echo "❌ Application failed to become healthy within ${MAX_WAIT_TIME}s"
-    echo "📋 Showing logs:"
-    docker-compose logs --tail=50
-    exit 1
-}
-
-# Rollback on failure
-rollback() {
-    echo "🔄 Rolling back deployment..."
-    docker-compose down
-    echo "✅ Rollback completed"
-}
-
-# Main execution
-main() {
-    trap rollback ERR
-    
-    check_prerequisites
-    deploy
-    
-    echo "🎉 Vismaya DemandOps is now running!"
-    echo "📊 Monitor with: docker-compose logs -f"
-    echo "🛑 Stop with: docker-compose down"
-}
-
-main "$@"
+# Application Configuration
+DEFAULT_BUDGET=80
+BUDGET_WARNING_LIMIT=80
+BUDGET_MAXIMUM_LIMIT=100
+BEDROCK_MODEL_ID=us.anthropic.claude-3-haiku-20240307-v1:0
 ```
 
-**Features:**
-- ✅ **Automated health checks** with timeout
-- ✅ **Rollback on failure** for reliability
-- ✅ **Prerequisites validation** before deployment
-- ✅ **Comprehensive logging** for troubleshooting
-- ✅ **Production ready** with proper error handling
-
-## 🎯 Deployment Scenarios
-
-### 🚀 **Development Deployment**
-
-**Quick setup for development and testing:**
-
+### Step 3: Deploy Locally with Virtual Environment
 ```bash
-# Basic development setup
-cd docker
+# Build with virtual environment support
+docker-compose build
+
+# Start the application
 docker-compose up -d
 
-# With live code reloading
-docker-compose -f docker-compose.dev.yml up -d
+# Check status
+docker-compose ps
 
 # View logs
 docker-compose logs -f vismaya
 ```
 
-**Development Features:**
-- Code volume mounting for live reloading
-- Debug mode enabled
-- Detailed logging
-- Hot reload capabilities
+### Step 4: Verify Virtual Environment in Container
+```bash
+# Check virtual environment inside container
+docker-compose exec vismaya which python
+# Should show: /opt/venv/bin/python
+
+# Verify venv structure
+docker-compose exec vismaya ls -la venv/
+# Should show: bin/ lib/ pyvenv.cfg
+
+# Check Python path
+docker-compose exec vismaya python -c "import sys; print(sys.prefix)"
+# Should show: /opt/venv
+```
+
+### Step 5: Access Application
+- **URL**: http://localhost:8501
+- **Health Check**: http://localhost:8501/_stcore/health
+
+### Local Management Commands
+```bash
+# Stop application
+docker-compose down
+
+# Restart application
+docker-compose restart
+
+# View real-time logs
+docker-compose logs -f
+
+# Update and rebuild (preserves venv)
+docker-compose down
+docker-compose build --no-cache
+docker-compose up -d
+
+# Access container shell with venv active
+docker-compose exec vismaya bash
+```
 
 ---
 
-### 🏭 **Production Deployment**
+## ☁️ AWS EC2 Instance Deployment
 
-**Optimized for production environments:**
+**Production-ready deployment on AWS EC2 with optimized virtual environment configuration**
 
+### Step 1: Launch EC2 Instance
+
+#### Recommended Instance Configuration:
+- **Instance Type**: t3.medium (2 vCPU, 4GB RAM) or larger
+- **AMI**: Amazon Linux 2023 or Ubuntu 22.04 LTS
+- **Storage**: 20GB GP3 SSD minimum
+- **Security Group**: Allow inbound traffic on port 8501
+
+#### Security Group Rules:
 ```bash
-# Production deployment
-cd docker
-./docker-deploy.sh
+# HTTP access for the application
+Type: Custom TCP
+Port: 8501
+Source: 0.0.0.0/0 (or restrict to your IP)
 
-# Or manual production setup
+# SSH access for management
+Type: SSH
+Port: 22
+Source: Your IP address
+```
+
+### Step 2: Connect to EC2 Instance
+```bash
+# SSH into your instance
+ssh -i your-key.pem ec2-user@your-instance-ip
+
+# Or using EC2 Instance Connect (if enabled)
+# Connect through AWS Console
+```
+
+### Step 3: Install Docker on EC2
+
+#### For Amazon Linux 2023:
+```bash
+# Update system
+sudo yum update -y
+
+# Install Docker
+sudo yum install -y docker
+sudo systemctl start docker
+sudo systemctl enable docker
+sudo usermod -a -G docker ec2-user
+
+# Install Docker Compose
+sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+sudo chmod +x /usr/local/bin/docker-compose
+
+# Logout and login again for group changes
+exit
+# SSH back in
+```
+
+#### For Ubuntu 22.04:
+```bash
+# Update system
+sudo apt update && sudo apt upgrade -y
+
+# Install Docker
+sudo apt install -y docker.io docker-compose
+sudo systemctl start docker
+sudo systemctl enable docker
+sudo usermod -a -G docker ubuntu
+
+# Logout and login again for group changes
+exit
+# SSH back in
+```
+
+### Step 4: Deploy Application on EC2
+```bash
+# Clone repository
+git clone https://github.com/sanjeevtripurari/Vismaya-DemandOps.git
+cd Vismaya-DemandOps/docker
+
+# Configure environment
+cp ../.env.example .env
+nano .env  # Edit with your AWS credentials
+```
+
+#### Production Environment Configuration:
+```bash
+# AWS Configuration (Use IAM roles when possible)
+AWS_REGION=us-east-2
+# For IAM roles, these can be omitted:
+# AWS_ACCESS_KEY_ID=
+# AWS_SECRET_ACCESS_KEY=
+# AWS_SESSION_TOKEN=
+
+# Production Settings
+ENVIRONMENT=production
+DEBUG=false
+PORT=8501
+
+# Budget Configuration
+DEFAULT_BUDGET=100
+BUDGET_WARNING_LIMIT=80
+BUDGET_MAXIMUM_LIMIT=120
+
+# AI Configuration
+BEDROCK_MODEL_ID=us.anthropic.claude-3-haiku-20240307-v1:0
+```
+
+### Step 5: Deploy with Production Configuration
+```bash
+# Build with virtual environment (production optimized)
+docker-compose -f docker-compose.prod.yml build
+
+# Deploy with virtual environment support
 docker-compose -f docker-compose.prod.yml up -d
 
-# Monitor deployment
-docker-compose logs -f
+# Verify deployment and virtual environment
+docker-compose ps
+docker-compose exec vismaya-prod which python  # Should show /opt/venv/bin/python
 curl http://localhost:8501/_stcore/health
 ```
 
-**Production Features:**
-- Optimized resource usage
-- Security hardening
-- Health monitoring
-- Automatic restarts
-- Log management
+---
+
+## 🔧 Docker Virtual Environment Architecture
+
+### Container Virtual Environment Structure
+```
+/app/                          # Application directory
+├── venv/                      # Local venv (for app.py detection)
+│   ├── bin/python            # Python executable
+│   ├── lib/                  # Python packages
+│   └── pyvenv.cfg           # Virtual environment config
+├── /opt/venv/               # Primary venv (Docker optimized)
+│   ├── bin/python           # Main Python executable
+│   ├── lib/                 # All dependencies
+│   └── pyvenv.cfg          # Virtual environment config
+└── app.py                   # Application entry point
+```
+
+### Virtual Environment Benefits in Docker:
+- ✅ **Isolation**: Dependencies isolated from system Python
+- ✅ **Consistency**: Same environment as local development
+- ✅ **Security**: Non-root user with proper permissions
+- ✅ **Performance**: Optimized package loading
+- ✅ **Debugging**: Easy to inspect and troubleshoot
+
+### Dockerfile Virtual Environment Implementation:
+```dockerfile
+# Create system-wide virtual environment
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install dependencies in venv
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Create app-level venv for detection
+RUN python -m venv venv
+RUN ./venv/bin/pip install --no-cache-dir -r requirements.txt
+
+# Use venv Python as default
+CMD ["/opt/venv/bin/python", "app.py"]
+```
 
 ---
 
-### ☁️ **Cloud Deployment**
+## 🔧 AWS IAM Configuration (Recommended for EC2)
 
-**Deploy to cloud platforms:**
+### Create IAM Role for EC2 Instance
 
-```bash
-# AWS ECS deployment
-docker build -t vismaya-demandops .
-docker tag vismaya-demandops:latest your-registry/vismaya-demandops:latest
-docker push your-registry/vismaya-demandops:latest
-
-# Deploy to ECS using task definition
-aws ecs update-service --cluster your-cluster --service vismaya-service
+#### Step 1: Create IAM Policy
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "ce:GetCostAndUsage",
+                "ce:GetUsageReport",
+                "ce:GetReservationCoverage",
+                "ce:GetReservationPurchaseRecommendation",
+                "ce:GetReservationUtilization",
+                "ce:GetSavingsPlansUtilization",
+                "ce:ListCostCategoryDefinitions",
+                "bedrock:InvokeModel",
+                "bedrock:InvokeModelWithResponseStream",
+                "ec2:DescribeInstances",
+                "ec2:DescribeImages",
+                "ec2:DescribeSnapshots",
+                "ec2:DescribeVolumes",
+                "s3:GetObject",
+                "s3:ListBucket",
+                "cloudwatch:GetMetricStatistics",
+                "cloudwatch:ListMetrics"
+            ],
+            "Resource": "*"
+        }
+    ]
+}
 ```
 
-## 🔧 Configuration Management
-
-### 📝 **Environment Variables**
-
-**Complete environment configuration:**
-
-| Variable | Default | Description | Required |
-|----------|---------|-------------|----------|
-| `AWS_REGION` | `us-east-2` | AWS region for services | ✅ |
-| `AWS_ACCESS_KEY_ID` | - | AWS access key | ✅ |
-| `AWS_SECRET_ACCESS_KEY` | - | AWS secret key | ✅ |
-| `BEDROCK_MODEL_ID` | `us.anthropic.claude-3-haiku-20240307-v1:0` | Bedrock AI model | ✅ |
-| `DEFAULT_BUDGET` | `80` | Budget warning limit | ✅ |
-| `BUDGET_WARNING_LIMIT` | `80` | Warning threshold | ✅ |
-| `BUDGET_MAXIMUM_LIMIT` | `100` | Critical threshold | ✅ |
-| `ENVIRONMENT` | `production` | Runtime environment | ⚪ |
-| `DEBUG` | `false` | Debug logging | ⚪ |
-| `PORT` | `8501` | Application port | ⚪ |
-
-### 🔐 **AWS Credentials**
-
-**Cross-platform authentication methods:**
-
-#### **Method 1: Environment Variables (Recommended)**
+#### Step 2: Create and Attach Role
 ```bash
-# In .env file (works on all platforms)
-AWS_ACCESS_KEY_ID=your_access_key
-AWS_SECRET_ACCESS_KEY=your_secret_key
-AWS_SESSION_TOKEN=your_session_token  # If using temporary credentials
-AWS_REGION=us-east-2
+# Create the role and attach to your EC2 instance
+# This can be done through AWS Console or CLI
+aws iam create-role --role-name VismayaEC2Role --assume-role-policy-document file://trust-policy.json
+aws iam attach-role-policy --role-name VismayaEC2Role --policy-arn arn:aws:iam::your-account:policy/VismayaPolicy
+aws ec2 associate-iam-instance-profile --instance-id i-1234567890abcdef0 --iam-instance-profile Name=VismayaEC2Role
 ```
 
-#### **Method 2: AWS Credentials File (Platform-specific)**
+---
+
+## 📊 Monitoring and Management
+
+### Health Monitoring
 ```bash
-# Step 1: Copy override template
-cp docker/docker-compose.override.yml.example docker/docker-compose.override.yml
+# Check application health
+curl http://your-instance-ip:8501/_stcore/health
 
-# Step 2: Edit docker-compose.override.yml and uncomment appropriate line:
-# For Linux/Mac: ${HOME}/.aws:/home/appuser/.aws:ro
-# For Windows: ${USERPROFILE}/.aws:/home/appuser/.aws:ro
-# Cross-platform: ${HOME:-${USERPROFILE}}/.aws:/home/appuser/.aws:ro
-```
-
-#### **Method 3: IAM Roles (For AWS deployment)**
-```yaml
-# No credentials needed - use IAM roles (ECS/EC2)
-task_role_arn: arn:aws:iam::account:role/VismayaTaskRole
-```
-
-## 📊 Monitoring & Management
-
-### 🔍 **Health Monitoring**
-
-**Built-in health checks and monitoring:**
-
-```bash
-# Check container health
+# Monitor container status
 docker-compose ps
 
-# View health check logs
-docker inspect vismaya-demandops --format='{{.State.Health.Status}}'
-
-# Manual health check
-curl http://localhost:8501/_stcore/health
-
-# Application metrics
-curl http://localhost:8501/_stcore/metrics
-```
-
-### 📋 **Log Management**
-
-**Comprehensive logging setup:**
-
-```bash
-# View real-time logs
+# View application logs
 docker-compose logs -f vismaya
 
-# View specific service logs
-docker-compose logs -f --tail=100 vismaya
+# Monitor system resources
+docker stats
 
-# Export logs
-docker-compose logs --no-color > vismaya-logs.txt
-
-# Log rotation (production)
-docker-compose -f docker-compose.prod.yml up -d
+# Check virtual environment status
+docker-compose exec vismaya python -c "import sys; print('Python:', sys.executable); print('Virtual Env:', sys.prefix)"
 ```
 
-### 📈 **Resource Monitoring**
-
-**Monitor container resource usage:**
-
+### Virtual Environment Debugging
 ```bash
-# Resource usage stats
-docker stats vismaya-demandops
+# Access container with venv active
+docker-compose exec vismaya bash
 
-# Detailed container info
-docker inspect vismaya-demandops
+# Check Python path and packages
+python -c "import sys; print('\n'.join(sys.path))"
 
-# System resource usage
-docker system df
-docker system prune  # Cleanup unused resources
+# List installed packages
+pip list
+
+# Check virtual environment activation
+echo $VIRTUAL_ENV
+which python
+which pip
 ```
+
+### Backup and Recovery
+```bash
+# Backup configuration
+tar -czf vismaya-backup-$(date +%Y%m%d).tar.gz .env docker-compose.yml
+
+# Backup application data (preserves venv)
+docker-compose exec vismaya tar -czf /tmp/data-backup.tar.gz /app/data
+docker cp vismaya-demandops:/tmp/data-backup.tar.gz ./data-backup.tar.gz
+```
+
+### Updates and Maintenance
+```bash
+# Update application (preserves virtual environment)
+cd Vismaya-DemandOps
+git pull origin main
+cd docker
+docker-compose down
+docker-compose build --no-cache  # Rebuilds venv with latest dependencies
+docker-compose up -d
+
+# Clean up old images (keeps venv optimized)
+docker system prune -f
+```
+
+---
 
 ## 🚨 Troubleshooting
 
-### Common Issues & Solutions
+### Common Issues
 
-#### ❌ **Container Won't Start**
+#### Virtual Environment Issues
 ```bash
-# Check logs
-docker-compose logs vismaya
+# Check if venv is properly created
+docker-compose exec vismaya ls -la /opt/venv/bin/
 
-# Check configuration
-docker-compose config
+# Verify Python executable
+docker-compose exec vismaya /opt/venv/bin/python --version
 
-# Rebuild container
-docker-compose build --no-cache
-docker-compose up -d
+# Check package installation
+docker-compose exec vismaya /opt/venv/bin/pip list
+
+# Test import of key packages
+docker-compose exec vismaya /opt/venv/bin/python -c "import streamlit, boto3, pandas; print('All packages imported successfully')"
 ```
 
-#### ❌ **Health Check Failing**
+#### Application Won't Start
 ```bash
-# Check application logs
-docker-compose logs -f vismaya
+# Check logs for venv issues
+docker-compose logs vismaya | grep -i "virtual\|venv\|python"
 
-# Test health endpoint manually
-docker exec -it vismaya-demandops curl localhost:8501/_stcore/health
+# Verify environment variables
+docker-compose exec vismaya env | grep -E "(AWS|PYTHON|PATH)"
 
-# Check port binding
-docker port vismaya-demandops
+# Test AWS connectivity with venv
+docker-compose exec vismaya /opt/venv/bin/python -c "import boto3; print(boto3.Session().get_credentials())"
 ```
 
-#### ❌ **AWS Connection Issues**
+#### Port Access Issues
 ```bash
-# Verify AWS credentials in container
-docker exec -it vismaya-demandops aws sts get-caller-identity
+# Check if port is open
+sudo netstat -tlnp | grep :8501
 
-# Check environment variables
-docker exec -it vismaya-demandops env | grep AWS
+# Check security group (AWS)
+aws ec2 describe-security-groups --group-ids sg-your-security-group-id
 
-# Test AWS connectivity
-docker exec -it vismaya-demandops python tests/integration/test-aws-connection.py
+# Test local connectivity
+curl -I http://localhost:8501
 ```
 
-#### ❌ **Performance Issues**
+#### Performance Issues
 ```bash
 # Check resource usage
 docker stats vismaya-demandops
 
-# Increase memory limits
-# Edit docker-compose.yml:
-deploy:
-  resources:
-    limits:
-      memory: 2G
-    reservations:
-      memory: 1G
+# Check virtual environment overhead
+docker-compose exec vismaya du -sh /opt/venv/
+
+# Check system resources
+free -h
+df -h
+top
 ```
 
-### 🔄 **Recovery Procedures**
+---
 
-#### **Quick Recovery**
-```bash
-# Restart services
-docker-compose restart
+## 🎯 Production Best Practices
 
-# Full reset
-docker-compose down
-docker-compose up -d
-```
+### Virtual Environment Security
+- ✅ Use isolated virtual environments in containers
+- ✅ Non-root user with proper venv permissions
+- ✅ Minimal base image with only required packages
+- ✅ Regular dependency updates in venv
+- ✅ Separate development and production venv configurations
 
-#### **Complete Reset**
-```bash
-# Remove everything and start fresh
-docker-compose down --volumes --rmi all
-docker system prune -f
-docker-compose build --no-cache
-docker-compose up -d
-```
-
-## 🎯 Best Practices
-
-### 🔐 **Security**
-- ✅ Use non-root user in containers
-- ✅ Mount AWS credentials as read-only
-- ✅ Use secrets management for sensitive data
-- ✅ Regular security updates with Watchtower
-- ✅ Network isolation with custom networks
-
-### 📈 **Performance**
-- ✅ Multi-stage builds for smaller images
-- ✅ Layer caching optimization
+### Performance Optimization
+- ✅ Multi-stage Docker builds for smaller images
+- ✅ Virtual environment caching for faster builds
+- ✅ Optimized Python package installation
 - ✅ Resource limits and reservations
 - ✅ Health checks for reliability
-- ✅ Log rotation and cleanup
 
-### 🛠️ **Maintenance**
-- ✅ Regular image updates
-- ✅ Automated backups of configuration
-- ✅ Monitoring and alerting setup
-- ✅ Documentation updates
-- ✅ Testing in staging environment
+### Reliability
+- ✅ Configure auto-restart policies
+- ✅ Set up health checks with venv validation
+- ✅ Use Application Load Balancer for high availability
+- ✅ Implement proper logging from venv
+- ✅ Regular backups including venv state
+
+---
+
+## 📞 Support
+
+### Quick Commands Reference
+```bash
+# Start application with venv
+docker-compose up -d
+
+# Stop application
+docker-compose down
+
+# View logs
+docker-compose logs -f
+
+# Restart application (preserves venv)
+docker-compose restart
+
+# Update application with venv rebuild
+git pull && docker-compose down && docker-compose build --no-cache && docker-compose up -d
+
+# Health check
+curl http://localhost:8501/_stcore/health
+
+# Virtual environment check
+docker-compose exec vismaya python -c "import sys; print('Using Python:', sys.executable)"
+```
+
+### Virtual Environment Validation
+```bash
+# Complete venv validation script
+docker-compose exec vismaya bash -c "
+echo 'Python Executable:' && which python
+echo 'Python Version:' && python --version
+echo 'Virtual Environment:' && echo \$VIRTUAL_ENV
+echo 'Python Path:' && python -c 'import sys; print(sys.executable)'
+echo 'Site Packages:' && python -c 'import site; print(site.getsitepackages())'
+echo 'Key Packages:' && python -c 'import streamlit, boto3, pandas; print(\"All packages available\")'
+"
+```
+
+### Getting Help
+- **Documentation**: Check main [README.md](../README.md)
+- **Virtual Environment Guide**: [VENV_SETUP_GUIDE.md](../VENV_SETUP_GUIDE.md)
+- **Issues**: Report on GitHub repository
+- **Logs**: Always include logs when reporting issues
+
+---
 
 ## 📚 Additional Resources
 
-### 🔗 **Quick Links**
 - **Main Documentation**: [../README.md](../README.md)
-- **Test Suite**: [../tests/README.md](../tests/README.md)
+- **Architecture Guide**: [../ARCHITECTURE.md](../ARCHITECTURE.md)
 - **Deployment Guide**: [../DEPLOYMENT_GUIDE.md](../DEPLOYMENT_GUIDE.md)
-- **Architecture**: [../ARCHITECTURE.md](../ARCHITECTURE.md)
-
-### 🎯 **Next Steps**
-1. **Deploy**: Use `docker-compose up -d` for quick start
-2. **Monitor**: Set up health checks and logging
-3. **Scale**: Configure for production workloads
-4. **Secure**: Implement proper secrets management
-5. **Optimize**: Fine-tune resource usage
+- **Test Documentation**: [../tests/README.md](../tests/README.md)
+- **Virtual Environment Setup**: [../VENV_SETUP_GUIDE.md](../VENV_SETUP_GUIDE.md)
 
 ---
 
-This comprehensive deployment guide ensures your Vismaya DemandOps application runs securely and efficiently in production environments.
-
-## Team
-
-**Team MaximAI** - Passionate about AI-driven solutions for cloud cost optimization
-
-### Our Mission
-To democratize cloud cost optimization through intelligent AI-powered solutions that make FinOps accessible to organizations of all sizes.
-
-## License
+## 📄 License
 
 MIT License - Built for AWS SuperHack 2025 by **Team MaximAI**
-
----
-
-**Ready to containerize your AWS cost management?** 
-
-Choose your deployment method above and get started with Docker! 🐳
