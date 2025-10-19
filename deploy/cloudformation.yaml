@@ -100,7 +100,7 @@ Resources:
     Properties:
       LaunchTemplateName: vismaya-launch-template
       LaunchTemplateData:
-        ImageId: ami-0c02fb55956c7d316  # Amazon Linux 2023
+        ImageId: ami-0530dd5f6d91099da  # Amazon Linux 2023
         InstanceType: !Ref InstanceType
         KeyName: !Ref KeyPairName
         IamInstanceProfile:
