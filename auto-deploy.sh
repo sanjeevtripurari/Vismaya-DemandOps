@@ -41,22 +41,32 @@ fi
 git clone -b v2-dev https://github.com/sanjeevtripurari/Vismaya-DemandOps.git
 cd Vismaya-DemandOps
 
-# Create .env file
+# Create .env file (using IAM role, no hardcoded credentials)
 echo "⚙️ Creating environment configuration..."
 cat > .env << 'EOF'
+# AWS Configuration - Uses IAM Role attached to EC2 instance
 AWS_REGION=us-east-2
 ENVIRONMENT=production
 DEBUG=false
 PORT=8503
+
+# Bedrock Configuration
 BEDROCK_MODEL_ID=us.anthropic.claude-3-haiku-20240307-v1:0
+
+# Budget Configuration
 DEFAULT_BUDGET=80
 BUDGET_WARNING_LIMIT=80
 BUDGET_MAXIMUM_LIMIT=100
+
+# AWS SSO Configuration (for reference only)
 SSO_START_URL=https://superopsglobalhackathon.awsapps.com/start/#
 SSO_REGION=us-east-2
 SSO_ACCOUNT_ID=559928724862
 SSO_ROLE_NAME=AdministratorAccess
 AWS_USER_EMAIL=sanjeevtripurari@gmail.com
+
+# Note: AWS credentials are provided by EC2 IAM role
+# No need for AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, or AWS_SESSION_TOKEN
 EOF
 
 # Create optimized docker-compose.yml
@@ -88,6 +98,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./data:/app/data
+      - ~/.aws:/root/.aws:ro  # Mount AWS credentials from host (IAM role)
     deploy:
       resources:
         limits:
