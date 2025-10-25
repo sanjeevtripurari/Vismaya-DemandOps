@@ -1,0 +1,103 @@
+# Vismaya DemandOps - Development Docker Compose
+# Optimized for development with live reloading and debugging
+
+version: '3.8'
+
+services:
+  vismaya-dev:
+    build: 
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: builder  # Use builder stage for development
+    container_name: vismaya-demandops-dev
+    ports:
+      - "8501:8501"
+      - "8502:8502"  # Additional port for debugging
+    environment:
+      - AWS_REGION=${AWS_REGION:-us-east-2}
+      - ENVIRONMENT=development
+      - DEBUG=true
+      - PORT=8501
+      - BEDROCK_MODEL_ID=${BEDROCK_MODEL_ID:-us.anthropic.claude-3-haiku-20240307-v1:0}
+      - DEFAULT_BUDGET=${DEFAULT_BUDGET:-80}
+      - BUDGET_WARNING_LIMIT=${BUDGET_WARNING_LIMIT:-80}
+      - BUDGET_MAXIMUM_LIMIT=${BUDGET_MAXIMUM_LIMIT:-100}
+      - PYTHONPATH=/app
+      - STREAMLIT_SERVER_HEADLESS=true
+      - STREAMLIT_SERVER_ENABLE_CORS=false
+      - STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION=false
+    env_file:
+      - ../.env
+    volumes:
+      # Live code reloading
+      - ../src:/app/src:ro
+      - ../app.py:/app/app.py:ro
+      - ../dashboard.py:/app/dashboard.py:ro
+      - ../config.py:/app/config.py:ro
+      - ../requirements.txt:/app/requirements.txt:ro
+      
+      # Logs and data
+      - ../logs:/app/logs
+      # AWS credentials: Use environment variables (recommended for development)
+      # Alternative: Mount AWS credentials (uncomment appropriate line)
+      # - ${HOME:-~}/.aws:/home/appuser/.aws:ro  # Linux/Mac
+      # - ${USERPROFILE}/.aws:/home/appuser/.aws:ro  # Windows
+      
+      # Development tools
+      - ../tests:/app/tests:ro
+    restart: unless-stopped
+    command: >
+      sh -c "
+        echo '🚀 Starting Vismaya DemandOps in Development Mode' &&
+        echo '📊 Debug mode enabled' &&
+        echo '🔄 Live reloading active' &&
+        python app.py
+      "
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - vismaya-dev-network
+
+  # Development database (optional)
+  redis-dev:
+    image: redis:7-alpine
+    container_name: vismaya-redis-dev
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-dev-data:/data
+    restart: unless-stopped
+    networks:
+      - vismaya-dev-network
+    profiles: ["cache"]
+
+  # Development monitoring
+  portainer-dev:
+    image: portainer/portainer-ce:latest
+    container_name: vismaya-portainer-dev
+    ports:
+      - "9000:9000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer-dev-data:/data
+    restart: unless-stopped
+    networks:
+      - vismaya-dev-network
+    profiles: ["monitoring"]
+
+networks:
+  vismaya-dev-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  redis-dev-data:
+    driver: local
+  portainer-dev-data:
+    driver: local

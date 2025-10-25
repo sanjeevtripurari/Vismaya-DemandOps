@@ -24,6 +24,72 @@ class BedrockAIAssistant(IAIAssistant):
         self._bedrock_client = None
         self._initialize_client()
     
+    def _estimate_tokens(self, text: str) -> int:
+        """Estimate token count for text (rough approximation)"""
+        # Rough estimation: ~4 characters per token for English text
+        return max(1, len(text) // 4)
+    
+    def _invoke_model_with_tracking(self, body: str, operation: str = "InvokeModel"):
+        """Invoke Bedrock model with cost tracking"""
+        # Parse the request to estimate input tokens
+        try:
+            request_data = json.loads(body)
+            messages = request_data.get('messages', [])
+            input_text = ""
+            for message in messages:
+                input_text += message.get('content', '')
+            
+            input_tokens = self._estimate_tokens(input_text)
+        except Exception as e:
+            logger.warning(f"Error parsing request for token estimation: {e}")
+            input_tokens = 100  # Default estimate
+        
+        try:
+            # Make the API call
+            response = self._bedrock_client.invoke_model(
+                body=body,
+                modelId=self._model_id,
+                accept='application/json',
+                contentType='application/json'
+            )
+            
+            # Read response body once and store it
+            response_body_bytes = response.get('body').read()
+            
+            # Parse response to estimate output tokens
+            try:
+                response_body = json.loads(response_body_bytes)
+                output_text = response_body.get('content', [{}])[0].get('text', '')
+                output_tokens = self._estimate_tokens(output_text)
+            except Exception as e:
+                logger.warning(f"Error parsing response for token estimation: {e}")
+                output_tokens = 50  # Default estimate
+            
+            # Track the cost
+            from ..services.api_cost_tracker import api_cost_tracker
+            api_cost_tracker.track_bedrock_call(
+                model_id=self._model_id,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                operation=operation
+            )
+            
+            # Create a new response object with the body content
+            # Since we already read the body, we need to create a new readable stream
+            import io
+            response['body'] = io.BytesIO(response_body_bytes)
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error invoking Bedrock model: {e}")
+            # Return a mock response structure to avoid breaking the flow
+            import io
+            mock_response = {
+                'body': io.BytesIO(b'{"content": [{"text": "Error: Unable to generate AI response"}]}')
+            }
+            return mock_response
+    
     def _initialize_client(self):
         """Initialize Bedrock client"""
         try:
@@ -52,15 +118,24 @@ class BedrockAIAssistant(IAIAssistant):
                 ]
             })
             
-            response = self._bedrock_client.invoke_model(
-                body=body,
-                modelId=self._model_id,
-                accept='application/json',
-                contentType='application/json'
-            )
+            response = self._invoke_model_with_tracking(body, "AnalyzeCosts")
             
-            response_body = json.loads(response.get('body').read())
-            return response_body['content'][0]['text']
+            # Read and parse response with better error handling
+            response_text = response.get('body').read()
+            if not response_text:
+                logger.warning("Empty response from Bedrock")
+                return self._get_mock_analysis(usage_summary)
+            
+            try:
+                response_body = json.loads(response_text)
+                if 'content' in response_body and len(response_body['content']) > 0:
+                    return response_body['content'][0]['text']
+                else:
+                    logger.warning("Invalid response structure from Bedrock")
+                    return self._get_mock_analysis(usage_summary)
+            except json.JSONDecodeError as je:
+                logger.error(f"JSON decode error: {je}, Response: {response_text[:100]}")
+                return self._get_mock_analysis(usage_summary)
             
         except Exception as e:
             logger.error(f"Error calling Bedrock for cost analysis: {e}")
@@ -85,18 +160,26 @@ class BedrockAIAssistant(IAIAssistant):
                 ]
             })
             
-            response = self._bedrock_client.invoke_model(
-                body=body,
-                modelId=self._model_id,
-                accept='application/json',
-                contentType='application/json'
-            )
+            response = self._invoke_model_with_tracking(body, "GenerateRecommendations")
             
-            response_body = json.loads(response.get('body').read())
-            recommendations_text = response_body['content'][0]['text']
+            # Read and parse response with better error handling
+            response_text = response.get('body').read()
+            if not response_text:
+                logger.warning("Empty response from Bedrock for recommendations")
+                return self._get_mock_recommendations(usage_summary)
             
-            # Parse the response into structured recommendations
-            return self._parse_recommendations(recommendations_text)
+            try:
+                response_body = json.loads(response_text)
+                if 'content' in response_body and len(response_body['content']) > 0:
+                    recommendations_text = response_body['content'][0]['text']
+                    # Parse the response into structured recommendations
+                    return self._parse_recommendations(recommendations_text)
+                else:
+                    logger.warning("Invalid response structure from Bedrock for recommendations")
+                    return self._get_mock_recommendations(usage_summary)
+            except json.JSONDecodeError as je:
+                logger.error(f"JSON decode error in recommendations: {je}, Response: {response_text[:100]}")
+                return self._get_mock_recommendations(usage_summary)
             
         except Exception as e:
             logger.error(f"Error generating recommendations: {e}")
@@ -127,18 +210,26 @@ class BedrockAIAssistant(IAIAssistant):
                 ]
             })
             
-            response = self._bedrock_client.invoke_model(
-                body=body,
-                modelId=self._model_id,
-                accept='application/json',
-                contentType='application/json'
-            )
+            response = self._invoke_model_with_tracking(body, "ChatResponse")
             
-            response_body = json.loads(response.get('body').read())
-            ai_response = response_body['content'][0]['text']
+            # Read and parse response with better error handling
+            response_text = response.get('body').read()
+            if not response_text:
+                logger.warning("Empty response from Bedrock for chat")
+                return self._get_contextual_fallback_response(message, context)
             
-            # Validate and enhance AI response with actual data
-            return self._validate_and_enhance_response(ai_response, context)
+            try:
+                response_body = json.loads(response_text)
+                if 'content' in response_body and len(response_body['content']) > 0:
+                    ai_response = response_body['content'][0]['text']
+                    # Validate and enhance AI response with actual data
+                    return self._validate_and_enhance_response(ai_response, context)
+                else:
+                    logger.warning("Invalid response structure from Bedrock for chat")
+                    return self._get_contextual_fallback_response(message, context)
+            except json.JSONDecodeError as je:
+                logger.error(f"JSON decode error in chat: {je}, Response: {response_text[:100]}")
+                return self._get_contextual_fallback_response(message, context)
             
         except Exception as e:
             logger.error(f"Error in chat response: {e}")

@@ -1,0 +1,387 @@
+name: Deploy Vismaya DemandOps to AWS
+
+on:
+  push:
+    branches: [ v2-dev ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+        - production
+        - staging
+      deploy_infrastructure:
+        description: 'Deploy infrastructure (CloudFormation)'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  AWS_REGION: us-east-2
+  APPLICATION_NAME: vismaya-demandops
+  STACK_NAME: vismaya-demandops-stack
+
+jobs:
+  validate:
+    name: Validate Configuration
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: v2-dev
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Validate AWS Account
+      run: |
+        ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+        EXPECTED_ACCOUNT="559928724862"
+        
+        if [ "$ACCOUNT_ID" != "$EXPECTED_ACCOUNT" ]; then
+          echo "❌ Wrong AWS account! Expected: $EXPECTED_ACCOUNT, Got: $ACCOUNT_ID"
+          exit 1
+        fi
+        
+        echo "✅ Correct AWS account validated: $ACCOUNT_ID"
+        echo "👤 User: $(aws sts get-caller-identity --query Arn --output text)"
+
+    - name: Validate CloudFormation template
+      run: |
+        aws cloudformation validate-template --template-body file://deploy/cloudformation.yaml
+        echo "✅ CloudFormation template is valid"
+
+  infrastructure:
+    name: Deploy Infrastructure
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.event.inputs.deploy_infrastructure == 'true' || github.event_name == 'push'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: v2-dev
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Get VPC and Subnet information
+      id: vpc-info
+      run: |
+        VPC_ID=$(aws ec2 describe-vpcs --region ${{ env.AWS_REGION }} --filters "Name=is-default,Values=true" --query 'Vpcs[0].VpcId' --output text)
+        SUBNET_IDS=$(aws ec2 describe-subnets --region ${{ env.AWS_REGION }} --filters "Name=vpc-id,Values=$VPC_ID" --query 'Subnets[*].SubnetId' --output text | tr '\t' ',')
+        
+        echo "vpc-id=$VPC_ID" >> $GITHUB_OUTPUT
+        echo "subnet-ids=$SUBNET_IDS" >> $GITHUB_OUTPUT
+        
+        echo "✅ VPC ID: $VPC_ID"
+        echo "✅ Subnet IDs: $SUBNET_IDS"
+
+    - name: Create or update key pair
+      run: |
+        # Check if key pair exists
+        if aws ec2 describe-key-pairs --key-names vismaya-key --region ${{ env.AWS_REGION }} >/dev/null 2>&1; then
+          echo "✅ Key pair 'vismaya-key' already exists"
+        else
+          echo "🔑 Creating new key pair..."
+          aws ec2 create-key-pair --key-name vismaya-key --region ${{ env.AWS_REGION }} --query 'KeyMaterial' --output text > /dev/null
+          echo "✅ Key pair 'vismaya-key' created"
+        fi
+
+    - name: Deploy CloudFormation stack
+      run: |
+        echo "🚀 Deploying CloudFormation stack..."
+        
+        aws cloudformation deploy \
+          --template-file deploy/cloudformation.yaml \
+          --stack-name ${{ env.STACK_NAME }} \
+          --region ${{ env.AWS_REGION }} \
+          --capabilities CAPABILITY_IAM \
+          --parameter-overrides \
+            VpcId=${{ steps.vpc-info.outputs.vpc-id }} \
+            SubnetIds="${{ steps.vpc-info.outputs.subnet-ids }}" \
+            KeyPairName=vismaya-key \
+          --tags \
+            Project=VismayaDemandOps \
+            Environment=Production \
+            DeployedBy=GitHubActions \
+            Repository=${{ github.repository }} \
+            Commit=${{ github.sha }}
+        
+        echo "✅ CloudFormation stack deployed successfully"
+
+    - name: Get stack outputs
+      id: stack-outputs
+      run: |
+        APPLICATION_URL=$(aws cloudformation describe-stacks \
+          --stack-name ${{ env.STACK_NAME }} \
+          --region ${{ env.AWS_REGION }} \
+          --query 'Stacks[0].Outputs[?OutputKey==`ApplicationURL`].OutputValue' \
+          --output text)
+        
+        LOAD_BALANCER_DNS=$(aws cloudformation describe-stacks \
+          --stack-name ${{ env.STACK_NAME }} \
+          --region ${{ env.AWS_REGION }} \
+          --query 'Stacks[0].Outputs[?OutputKey==`LoadBalancerDNS`].OutputValue' \
+          --output text)
+        
+        echo "application-url=$APPLICATION_URL" >> $GITHUB_OUTPUT
+        echo "load-balancer-dns=$LOAD_BALANCER_DNS" >> $GITHUB_OUTPUT
+        
+        echo "🌐 Application URL: $APPLICATION_URL"
+        echo "⚖️ Load Balancer DNS: $LOAD_BALANCER_DNS"
+
+  deploy:
+    name: Deploy Application
+    runs-on: ubuntu-latest
+    needs: [validate, infrastructure]
+    if: always() && (needs.validate.result == 'success')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: v2-dev
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Wait for infrastructure
+      if: needs.infrastructure.result == 'success'
+      run: |
+        echo "⏳ Waiting for infrastructure to be ready..."
+        sleep 120  # Wait 2 minutes for instances to initialize
+
+    - name: Create deployment package
+      run: |
+        # Create deployment directory
+        mkdir -p deployment
+        
+        # Copy application files
+        cp -r src deployment/
+        cp -r docker deployment/
+        cp app.py dashboard.py ai_assistant.py deployment/
+        cp docker-compose.yml deployment/ || cp docker/docker-compose.prod.yml deployment/docker-compose.yml
+        cp requirements.txt deployment/ || echo "streamlit>=1.28.0" > deployment/requirements.txt
+        
+        # Create production environment file
+        cat > deployment/.env << 'EOF'
+        # AWS Configuration
+        AWS_REGION=${{ env.AWS_REGION }}
+        ENVIRONMENT=production
+        DEBUG=false
+        PORT=8503
+        
+        # Bedrock Configuration
+        BEDROCK_MODEL_ID=${{ secrets.BEDROCK_MODEL_ID }}
+        
+        # Budget Configuration
+        DEFAULT_BUDGET=${{ secrets.DEFAULT_BUDGET }}
+        BUDGET_WARNING_LIMIT=${{ secrets.BUDGET_WARNING_LIMIT }}
+        BUDGET_MAXIMUM_LIMIT=${{ secrets.BUDGET_MAXIMUM_LIMIT }}
+        
+        # AWS SSO Configuration
+        SSO_START_URL=${{ secrets.SSO_START_URL }}
+        SSO_REGION=${{ env.AWS_REGION }}
+        SSO_ACCOUNT_ID=${{ secrets.SSO_ACCOUNT_ID }}
+        SSO_ROLE_NAME=${{ secrets.SSO_ROLE_NAME }}
+        AWS_USER_EMAIL=${{ secrets.AWS_USER_EMAIL }}
+        EOF
+        
+        # Create deployment script
+        cat > deployment/deploy.sh << 'EOF'
+        #!/bin/bash
+        set -e
+        
+        echo "🚀 Starting Vismaya DemandOps deployment..."
+        
+        # Stop existing containers
+        docker-compose down || true
+        
+        # Remove old images
+        docker system prune -f
+        
+        # Build and start new containers
+        docker-compose build --no-cache
+        docker-compose up -d
+        
+        # Wait for application to start
+        sleep 30
+        
+        # Health check
+        if curl -f http://localhost:8503/_stcore/health; then
+            echo "✅ Deployment successful!"
+            echo "📊 Application is running at http://$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4):8503"
+        else
+            echo "❌ Health check failed"
+            docker-compose logs
+            exit 1
+        fi
+        EOF
+        
+        chmod +x deployment/deploy.sh
+        
+        # Create archive
+        tar -czf vismaya-deployment.tar.gz -C deployment .
+
+    - name: Upload to S3
+      run: |
+        # Create S3 bucket if it doesn't exist
+        aws s3 mb s3://vismaya-deployments-${{ github.run_number }} --region ${{ env.AWS_REGION }} || true
+        
+        # Upload deployment package
+        aws s3 cp vismaya-deployment.tar.gz s3://vismaya-deployments-${{ github.run_number }}/vismaya-deployment.tar.gz
+
+    - name: Deploy to EC2
+      run: |
+        # Get EC2 instance ID by tag
+        INSTANCE_ID=$(aws ec2 describe-instances \
+          --filters "Name=tag:Name,Values=vismaya-demandops" "Name=instance-state-name,Values=running" \
+          --query 'Reservations[0].Instances[0].InstanceId' \
+          --output text \
+          --region ${{ env.AWS_REGION }})
+        
+        if [ "$INSTANCE_ID" = "None" ] || [ -z "$INSTANCE_ID" ]; then
+          echo "❌ No running EC2 instance found with tag Name=vismaya-demandops"
+          echo "Please ensure your EC2 instance is running and properly tagged"
+          exit 1
+        fi
+        
+        echo "📍 Found EC2 instance: $INSTANCE_ID"
+        
+        # Create deployment commands
+        COMMANDS=$(cat << 'EOF'
+        #!/bin/bash
+        set -e
+        
+        echo "📥 Downloading deployment package..."
+        cd /home/ec2-user
+        
+        # Download from S3
+        aws s3 cp s3://vismaya-deployments-${{ github.run_number }}/vismaya-deployment.tar.gz . --region ${{ env.AWS_REGION }}
+        
+        # Backup current deployment
+        if [ -d "Vismaya-DemandOps" ]; then
+          mv Vismaya-DemandOps Vismaya-DemandOps-backup-$(date +%Y%m%d-%H%M%S)
+        fi
+        
+        # Extract new deployment
+        mkdir -p Vismaya-DemandOps
+        tar -xzf vismaya-deployment.tar.gz -C Vismaya-DemandOps
+        cd Vismaya-DemandOps
+        
+        # Run deployment
+        ./deploy.sh
+        
+        # Cleanup
+        rm -f /home/ec2-user/vismaya-deployment.tar.gz
+        
+        echo "🎉 Deployment completed successfully!"
+        EOF
+        )
+        
+        # Execute deployment on EC2
+        aws ssm send-command \
+          --instance-ids "$INSTANCE_ID" \
+          --document-name "AWS-RunShellScript" \
+          --parameters "commands=[\"$COMMANDS\"]" \
+          --region ${{ env.AWS_REGION }} \
+          --output table
+
+    - name: Verify deployment
+      run: |
+        # Get instance public IP
+        PUBLIC_IP=$(aws ec2 describe-instances \
+          --filters "Name=tag:Name,Values=vismaya-demandops" "Name=instance-state-name,Values=running" \
+          --query 'Reservations[0].Instances[0].PublicIpAddress' \
+          --output text \
+          --region ${{ env.AWS_REGION }})
+        
+        if [ "$PUBLIC_IP" != "None" ] && [ -n "$PUBLIC_IP" ]; then
+          echo "🌐 Application URL: http://$PUBLIC_IP:8503"
+          
+          # Wait for application to be ready
+          echo "⏳ Waiting for application to be ready..."
+          sleep 60
+          
+          # Health check (optional - might fail due to network restrictions)
+          if curl -f --connect-timeout 10 http://$PUBLIC_IP:8503/_stcore/health 2>/dev/null; then
+            echo "✅ Application is healthy and accessible"
+          else
+            echo "⚠️  Health check failed - this might be due to network restrictions"
+            echo "Please manually verify the application at: http://$PUBLIC_IP:8503"
+          fi
+        else
+          echo "⚠️  Could not retrieve public IP address"
+        fi
+
+    - name: Cleanup S3
+      if: always()
+      run: |
+        # Clean up deployment bucket
+        aws s3 rm s3://vismaya-deployments-${{ github.run_number }}/vismaya-deployment.tar.gz || true
+        aws s3 rb s3://vismaya-deployments-${{ github.run_number }} || true
+
+    - name: Notify deployment status
+      if: always()
+      run: |
+        if [ "${{ job.status }}" = "success" ]; then
+          echo "🎉 Deployment completed successfully!"
+          echo "📊 Your Vismaya DemandOps application is now running on EC2"
+        else
+          echo "❌ Deployment failed. Please check the logs above."
+        fiployment failed!"
+        fi
+
+  rollback:
+    name: Rollback on failure
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: failure()
+    
+    steps:
+    - name: Setup SSH for rollback
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.EC2_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+
+    - name: Rollback deployment
+      run: |
+        echo "🔄 Rolling back deployment..."
+        ssh -i ~/.ssh/id_rsa ${{ env.EC2_USER }}@${{ secrets.EC2_HOST }} << 'ENDSSH'
+          cd ${{ env.APP_DIR }}
+          
+          echo "🛑 Stopping failed deployment..."
+          docker-compose down || true
+          
+          echo "⏪ Rolling back to previous version..."
+          git checkout HEAD~1
+          
+          echo "🚀 Starting previous version..."
+          docker-compose up -d
+          
+          echo "✅ Rollback completed"
+        ENDSSH

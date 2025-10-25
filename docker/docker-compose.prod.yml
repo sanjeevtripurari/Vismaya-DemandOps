@@ -1,0 +1,159 @@
+# Vismaya DemandOps - Production Docker Compose
+# Optimized for production with security, monitoring, and scaling
+
+version: '3.8'
+
+services:
+  vismaya-prod:
+    build: 
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: vismaya-demandops:latest
+    container_name: vismaya-demandops-prod
+    ports:
+      - "8501:8501"
+    environment:
+      - AWS_REGION=${AWS_REGION:-us-east-2}
+      - ENVIRONMENT=production
+      - DEBUG=false
+      - PORT=8501
+      - BEDROCK_MODEL_ID=${BEDROCK_MODEL_ID:-us.anthropic.claude-3-haiku-20240307-v1:0}
+      - DEFAULT_BUDGET=${DEFAULT_BUDGET:-80}
+      - BUDGET_WARNING_LIMIT=${BUDGET_WARNING_LIMIT:-80}
+      - BUDGET_MAXIMUM_LIMIT=${BUDGET_MAXIMUM_LIMIT:-100}
+      - PYTHONUNBUFFERED=1
+      - STREAMLIT_SERVER_HEADLESS=true
+      - STREAMLIT_SERVER_ENABLE_CORS=false
+      - STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION=true
+      - STREAMLIT_SERVER_MAX_UPLOAD_SIZE=10
+    env_file:
+      - ../.env
+    volumes:
+      # Logs only (no source code mounting in production)
+      - vismaya-logs:/app/logs
+      # AWS credentials: Use environment variables or IAM roles (recommended for production)
+      # For development/testing only (uncomment appropriate line):
+      # - ${HOME:-~}/.aws:/home/appuser/.aws:ro  # Linux/Mac
+      # - ${USERPROFILE}/.aws:/home/appuser/.aws:ro  # Windows
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - vismaya-prod-network
+    depends_on:
+      - redis-prod
+
+  # Production cache
+  redis-prod:
+    image: redis:7-alpine
+    container_name: vismaya-redis-prod
+    volumes:
+      - redis-prod-data:/data
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+    networks:
+      - vismaya-prod-network
+    profiles: ["cache"]
+
+  # Production monitoring
+  watchtower-prod:
+    image: containrrr/watchtower
+    container_name: vismaya-watchtower-prod
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=3600
+      - WATCHTOWER_INCLUDE_STOPPED=true
+      - WATCHTOWER_REVIVE_STOPPED=true
+      - WATCHTOWER_NOTIFICATIONS=slack
+      - WATCHTOWER_NOTIFICATION_SLACK_HOOK_URL=${SLACK_WEBHOOK_URL}
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+    networks:
+      - vismaya-prod-network
+    profiles: ["monitoring"]
+
+  # Log aggregation
+  fluentd-prod:
+    image: fluent/fluentd:v1.16-debian-1
+    container_name: vismaya-fluentd-prod
+    volumes:
+      - ./fluentd.conf:/fluentd/etc/fluent.conf
+      - vismaya-logs:/app/logs:ro
+    ports:
+      - "24224:24224"
+      - "24224:24224/udp"
+    restart: always
+    networks:
+      - vismaya-prod-network
+    profiles: ["logging"]
+
+  # Reverse proxy with SSL
+  nginx-prod:
+    image: nginx:alpine
+    container_name: vismaya-nginx-prod
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    restart: always
+    depends_on:
+      - vismaya-prod
+    networks:
+      - vismaya-prod-network
+    profiles: ["proxy"]
+
+networks:
+  vismaya-prod-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16
+
+volumes:
+  vismaya-logs:
+    driver: local
+  redis-prod-data:
+    driver: local

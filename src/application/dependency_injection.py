@@ -9,15 +9,21 @@ from typing import Dict, Any
 
 from ..core.interfaces import (
     ICostDataProvider, IResourceProvider, IForecastingService, 
-    IAIAssistant, IAuthenticationService
+    IAIAssistant, IAuthenticationService, IForecastingAIAssistant,
+    IAWSPricingProvider, IQueryParser, ICostEstimationEngine
 )
 from ..infrastructure.aws_cost_provider import AWSCostProvider
 from ..infrastructure.aws_resource_provider import AWSResourceProvider
 from ..infrastructure.bedrock_ai_assistant import BedrockAIAssistant
 from ..infrastructure.aws_session_factory import AWSSessionFactory, AWSAuthenticationService
 from ..infrastructure.sqlite_repository import SQLiteRepository
+from ..infrastructure.aws_pricing_provider import AWSPricingProvider
+from ..infrastructure.forecasting_bedrock_assistant import ForecastingBedrockAssistant
 from ..services.cost_service import CostAnalysisService
 from ..services.resource_service import ResourceManagementService
+from ..services.query_parser import NaturalLanguageQueryParser
+from ..services.cost_estimation_engine import CostEstimationEngine
+from ..services.forecasting_ai_assistant import ForecastingAIAssistant
 from .use_cases import (
     GetUsageSummaryUseCase, AnalyzeScenarioUseCase, 
     GetCostInsightsUseCase, HandleChatUseCase, GetResourceDetailsUseCase
@@ -27,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 
 class SimpleForecastingService(IForecastingService):
-    """Simple forecasting implementation"""
+    """Enhanced forecasting implementation with organic growth projections"""
     
     async def generate_forecast(self, historical_data):
         from ..core.models import CostForecast
@@ -39,20 +45,36 @@ class SimpleForecastingService(IForecastingService):
                 base_amount=0.0
             )
         
-        # Simple linear trend forecast
+        # Calculate organic growth based on current usage patterns
         recent_amount = historical_data[-1].amount
+        
         if len(historical_data) > 1:
+            # Calculate trend from historical data
             previous_amount = historical_data[-2].amount
-            trend_factor = recent_amount / previous_amount if previous_amount > 0 else 1.1
+            growth_rate = (recent_amount - previous_amount) / previous_amount if previous_amount > 0 else 0
         else:
-            trend_factor = 1.1
+            # For single data point, assume minimal organic growth
+            growth_rate = 0.05  # 5% monthly growth for new accounts
+        
+        # Cap growth rate to realistic bounds
+        growth_rate = max(-0.5, min(growth_rate, 2.0))  # Between -50% and 200%
+        
+        # Calculate daily growth rate
+        daily_growth_rate = growth_rate / 30
+        
+        # Project 30-day forecast with organic growth
+        forecasted_amount = recent_amount * (1 + growth_rate)
+        
+        # Calculate confidence based on data availability
+        confidence = min(0.9, 0.5 + (len(historical_data) * 0.1))
         
         return CostForecast(
-            forecasted_amount=recent_amount * trend_factor,
-            confidence_level=0.8,
+            forecasted_amount=forecasted_amount,
+            confidence_level=confidence,
             forecast_period_days=30,
             base_amount=recent_amount,
-            trend_factor=trend_factor
+            trend_factor=1 + growth_rate,
+            daily_growth_rate=daily_growth_rate
         )
     
     async def analyze_scenario(self, current_usage, scenario):
@@ -99,12 +121,29 @@ class DependencyContainer:
             self._services['data_repository'] = SQLiteRepository()
             
             # Data providers
-            self._services['cost_provider'] = AWSCostProvider(aws_session)
+            self._services['cost_provider'] = AWSCostProvider(aws_session, self._config)
             self._services['resource_provider'] = AWSResourceProvider(aws_session)
             self._services['forecasting_service'] = SimpleForecastingService()
             self._services['ai_assistant'] = BedrockAIAssistant(
                 aws_session, 
                 self._config.BEDROCK_MODEL_ID
+            )
+            
+            # Forecasting AI components
+            self._services['pricing_provider'] = AWSPricingProvider(aws_session, self._config)
+            self._services['query_parser'] = NaturalLanguageQueryParser()
+            self._services['cost_estimation_engine'] = CostEstimationEngine()
+            self._services['forecasting_bedrock_assistant'] = ForecastingBedrockAssistant(
+                aws_session,
+                self._config.BEDROCK_MODEL_ID
+            )
+            
+            # Forecasting AI Assistant
+            self._services['forecasting_ai_assistant'] = ForecastingAIAssistant(
+                self._services['pricing_provider'],
+                self._services['query_parser'],
+                self._services['cost_estimation_engine'],
+                self._services['ai_assistant']
             )
             
             # Application services
@@ -122,12 +161,11 @@ class DependencyContainer:
             self._services['get_usage_summary_use_case'] = GetUsageSummaryUseCase(
                 self._services['cost_service'],
                 self._services['resource_service'],
-                self._config.DEFAULT_BUDGET
+                self._config
             )
             
             self._services['analyze_scenario_use_case'] = AnalyzeScenarioUseCase(
-                self._services['resource_service'],
-                self._config.DEFAULT_BUDGET
+                self._services['resource_service']
             )
             
             self._services['get_cost_insights_use_case'] = GetCostInsightsUseCase(
@@ -186,6 +224,20 @@ class DependencyContainer:
             # Check AI assistant
             ai_assistant = self.get('ai_assistant')
             health_status['ai_assistant'] = ai_assistant._bedrock_client is not None
+            
+            # Check forecasting AI assistant
+            try:
+                forecasting_ai = self.get('forecasting_ai_assistant')
+                health_status['forecasting_ai'] = forecasting_ai is not None
+            except Exception:
+                health_status['forecasting_ai'] = False
+            
+            # Check pricing provider
+            try:
+                pricing_provider = self.get('pricing_provider')
+                health_status['pricing_provider'] = pricing_provider._pricing_client is not None
+            except Exception:
+                health_status['pricing_provider'] = False
             
         except Exception as e:
             logger.error(f"Health check error: {e}")

@@ -17,7 +17,7 @@ from config import Config
 st.set_page_config(
     page_title="Vismaya - DemandOps",
     page_icon="📊",
-    layout="centered",
+    layout="wide",
     initial_sidebar_state="collapsed"
 )
 
@@ -26,13 +26,53 @@ st.markdown("""
 <style>
     /* Main container adjustments - optimized for full screen usage */
     .main .block-container {
-        max-width: 1400px;
+        max-width: 100%;
         padding-top: 0.5rem;
-        padding-left: 1rem;
-        padding-right: 1rem;
+        padding-left: 2rem;
+        padding-right: 2rem;
         padding-bottom: 0.5rem;
         margin: 0 auto;
         min-height: 95vh;
+    }
+    
+    /* Hide data-testid attributes */
+    [data-testid] {
+        border: none !important;
+    }
+    
+    /* Remove testid visual indicators */
+    [data-testid]:before {
+        display: none !important;
+    }
+    
+    /* Form button styling for better alignment */
+    .stForm {
+        border: none !important;
+    }
+    
+    .stForm > div {
+        gap: 0.5rem !important;
+    }
+    
+    .stForm button {
+        height: 38px !important;
+        font-size: 14px !important;
+        border-radius: 6px !important;
+        border: 1px solid #ddd !important;
+        transition: all 0.2s ease !important;
+    }
+    
+    .stForm button:hover {
+        transform: translateY(-1px) !important;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
+    }
+    
+    /* Responsive button layout */
+    @media (max-width: 768px) {
+        .stForm button {
+            font-size: 12px !important;
+            padding: 0.25rem 0.5rem !important;
+        }
     }
     
     /* Header styling - more compact */
@@ -568,34 +608,46 @@ class VismayaDashboard:
         self.repository = SQLiteRepository()
         
     def load_data(self):
-        """Load AWS cost and usage data"""
-        if 'data_loaded' not in st.session_state or st.button("🔄 Refresh Data"):
-            with st.spinner("Loading AWS data..."):
+        """Load AWS cost and usage data from SQLite first, no loading screens"""
+        
+        if 'data_loaded' not in st.session_state:
+            # Always load from SQLite first for instant UI
+            try:
+                # Try to get today's cached data
+                today = datetime.now()
+                cached_summary = asyncio.run(self.repository.get_usage_summary(today))
+                
+                if cached_summary:
+                    # Use cached data immediately
+                    st.session_state.usage_summary = cached_summary
+                    st.session_state.data_loaded = True
+                    st.session_state.last_refresh = cached_summary.last_updated
+                else:
+                    # Try to get any recent cached data (within last 7 days)
+                    historical_summaries = asyncio.run(self.repository.get_historical_summaries(7))
+                    if historical_summaries:
+                        latest_summary = historical_summaries[0]
+                        st.session_state.usage_summary = latest_summary
+                        st.session_state.data_loaded = True
+                        st.session_state.last_refresh = latest_summary.last_updated
+                    else:
+                        # Load default empty data as last resort
+                        default_summary = asyncio.run(self.repository.get_default_usage_summary())
+                        st.session_state.usage_summary = default_summary
+                        st.session_state.data_loaded = True
+                        st.session_state.last_refresh = datetime.now()
+                        
+            except Exception as e:
+                logger.warning(f"Could not load any data: {e}")
+                # Load default empty data as fallback
                 try:
-                    # Use the new use case pattern
-                    usage_summary_use_case = self.container.get_use_case('get_usage_summary')
-                    usage_summary = asyncio.run(usage_summary_use_case.execute())
-                    
-                    # Save to database
-                    asyncio.run(self.repository.save_usage_summary(usage_summary))
-                    
-                    st.session_state.usage_summary = usage_summary
+                    default_summary = asyncio.run(self.repository.get_default_usage_summary())
+                    st.session_state.usage_summary = default_summary
                     st.session_state.data_loaded = True
                     st.session_state.last_refresh = datetime.now()
-                    
-                except Exception as e:
-                    st.error(f"Error loading data: {e}")
-                    # Try to load from database
-                    try:
-                        historical_data = asyncio.run(self.repository.get_historical_summaries(1))
-                        if historical_data:
-                            st.session_state.usage_summary = historical_data[0]['data']
-                            st.session_state.data_loaded = True
-                            st.info("Loaded cached data from database")
-                        else:
-                            st.session_state.data_loaded = False
-                    except:
-                        st.session_state.data_loaded = False
+                except Exception as fallback_error:
+                    logger.error(f"Could not load default data: {fallback_error}")
+                    st.session_state.data_loaded = False
     
     def calculate_metrics(self):
         """Calculate key financial metrics"""
@@ -603,19 +655,24 @@ class VismayaDashboard:
             usage_summary = st.session_state.usage_summary
             budget_info = usage_summary.budget_info
             
+            # Handle empty/default data gracefully
+            current_spend = budget_info.current_spend if budget_info.current_spend is not None else 0.0
+            forecast_amount = usage_summary.cost_forecast.forecasted_amount if usage_summary.cost_forecast.forecasted_amount is not None else 0.0
+            trend_factor = usage_summary.cost_forecast.trend_factor if usage_summary.cost_forecast.trend_factor is not None else 1.0
+            
             return {
-                'current_spend': budget_info.current_spend,
-                'budget': budget_info.total_budget,
+                'current_spend': current_spend,
+                'budget': budget_info.warning_limit or Config.BUDGET_WARNING_LIMIT,
                 'budget_pct': budget_info.utilization_percentage,
-                'forecast': usage_summary.cost_forecast.forecasted_amount,
-                'trending': 'up' if usage_summary.cost_forecast.trend_factor > 1.0 else 'down',
+                'forecast': forecast_amount,
+                'trending': 'up' if trend_factor > 1.0 else 'stable' if trend_factor == 1.0 else 'down',
                 'has_resources': len(usage_summary.ec2_instances) > 0 or len(usage_summary.storage_volumes) > 0 or len(usage_summary.database_instances) > 0
             }
         else:
             # Fallback data - simulate no resources scenario
             return {
                 'current_spend': 0.00,  # No spend if no resources
-                'budget': Config.DEFAULT_BUDGET,
+                'budget': Config.BUDGET_WARNING_LIMIT,
                 'budget_pct': 0.0,
                 'forecast': 0.00,
                 'trending': 'stable',
@@ -630,7 +687,7 @@ class VismayaDashboard:
     
     def render_navigation(self):
         """Render navigation tabs"""
-        return st.tabs(["Current Usage", "Detailed Usage", "Forecast", "Historical Data", "Settings"])
+        return st.tabs(["Current Usage", "Detailed Usage", "Detailed Billing", "Forecast", "Historical Data", "Settings"])
     
     def render_metrics_row(self, metrics):
         """Render the top metrics row"""
@@ -806,41 +863,11 @@ class VismayaDashboard:
         st.markdown('</div>', unsafe_allow_html=True)
     
     def render_ai_assistant(self, metrics):
-        """Render AI assistant section matching the original design"""
+        """Render AI assistant section with input first, then response"""
         
-        # Agent Response section
-        st.markdown("### Agent Response:")
-        
-        # Get AI analysis
-        try:
-            cost_insights_use_case = self.container.get_use_case('get_cost_insights')
-            analysis = asyncio.run(cost_insights_use_case.execute())
-        except Exception as e:
-            # Fallback analysis matching the design
-            budget_pct = metrics['budget_pct']
-            overspend = metrics['forecast'] - metrics['budget']
-            
-            if budget_pct > 80:
-                analysis = f"""You have spent ${metrics['current_spend']:,.0f} of ${metrics['budget']:,.0f} budget ({budget_pct:.0f}%).
-
-At this rate, you'll overshoot by ${overspend:,.0f}.
-
-Suggested:
-Move 3 EC2 to Spot → Save $120.
-Optimize RDS storage → Save $200.
-Review unused EBS volumes → Save $150."""
-            else:
-                analysis = f"""You're at {budget_pct:.0f}% of your ${metrics['budget']:,.0f} budget. Good progress!
-
-Recommendations:
-• Monitor EC2 usage patterns
-• Consider Reserved Instances for steady workloads
-• Set up cost alerts at 90% budget"""
-        
-        st.markdown(f'<div class="suggestion-box">{analysis}</div>', unsafe_allow_html=True)
-        
-        # AI Assistant Chat Box
-        st.markdown("### AI Assistant Box")
+        # Initialize chat history
+        if 'chat_history' not in st.session_state:
+            st.session_state.chat_history = []
         
         # Show data context indicator
         try:
@@ -858,115 +885,409 @@ Recommendations:
         except Exception:
             st.info("🔵 Using available data")
         
-        # Create a more compact chat interface
-        with st.container():
-            # Initialize chat history
-            if 'chat_history' not in st.session_state:
-                st.session_state.chat_history = []
+        # AI Assistant Chat Input Section - NOW AT TOP
+        st.markdown("### 💬 Ask AI Assistant")
+        
+        # Chat input form with horizontal buttons
+        with st.form("chat_form", clear_on_submit=True):
+            user_input = st.text_input(
+                "", 
+                placeholder="Ask about your AWS costs, optimization opportunities, or any questions...",
+                key="chat_input_form"
+            )
             
-            # Quick action buttons - more compact
-            col1, col2 = st.columns(2)
+            # Horizontal button layout with proper spacing
+            col1, col2, col3, col4, col5 = st.columns([2, 1.5, 1.5, 1.5, 1])
             with col1:
-                if st.button("💰 Costs", key="quick_costs", help="Current AWS costs"):
-                    st.session_state.pending_question = "What are my current AWS costs?"
-                    st.rerun()
-                if st.button("🔧 Optimize", key="quick_optimize", help="Optimization tips"):
-                    st.session_state.pending_question = "How can I optimize my AWS costs?"
-                    st.rerun()
+                submitted = st.form_submit_button("Send", type="primary", use_container_width=True)
             with col2:
-                if st.button("📊 Services", key="quick_services", help="Top services by cost"):
-                    st.session_state.pending_question = "Which AWS services cost the most?"
-                    st.rerun()
-                if st.button("📈 Forecast", key="quick_forecast", help="Cost forecast"):
-                    st.session_state.pending_question = "What's my cost forecast?"
-                    st.rerun()
+                clear_chat = st.form_submit_button("🗑️ Clear", use_container_width=True)
+            with col3:
+                scroll_chat = st.form_submit_button("📜 Scroll", use_container_width=True)
+            with col4:
+                refresh_data = st.form_submit_button("🔄 Refresh", use_container_width=True)
+            with col5:
+                st.write("")  # Empty space for balance
             
-            # Handle pending questions from quick buttons
-            if 'pending_question' in st.session_state:
-                user_input = st.session_state.pending_question
-                del st.session_state.pending_question
-                
-                # Process the pending question immediately
-                with st.spinner("Analyzing your AWS data..."):
-                    try:
-                        chat_use_case = self.container.get_use_case('handle_chat')
-                        response = asyncio.run(chat_use_case.execute(user_input))
-                    except Exception as e:
-                        response = f"I'm having trouble accessing your AWS data. Error: {str(e)[:100]}... Please check your AWS connection and try again."
-                
-                # Add to chat history
-                st.session_state.chat_history.append({
-                    'user': user_input,
-                    'assistant': response,
-                    'timestamp': datetime.now()
-                })
+        # Handle form submissions outside the form to prevent blocking
+        if submitted and user_input and user_input.strip():
+            # Add user message immediately to show responsiveness
+            st.session_state.chat_history.append({
+                'user': user_input,
+                'assistant': "🤖 Processing your question...",
+                'timestamp': datetime.now(),
+                'processing': True
+            })
             
-            # Chat input with form to handle submission properly
-            with st.form("chat_form", clear_on_submit=True):
-                user_input = st.text_input(
-                    "Ask about your AWS costs...", 
-                    placeholder="Try: 'What's my EC2 spending?' or 'Show me optimization opportunities'",
-                    key="chat_input_form"
-                )
-                submitted = st.form_submit_button("Send", type="primary")
+            # Store the question for background processing
+            st.session_state.pending_chat_question = user_input
+            st.rerun()
+        
+        elif clear_chat:
+            st.session_state.chat_history = []
+            st.rerun()
+        
+        elif scroll_chat:
+            # Scroll to bottom of chat (handled by UI automatically)
+            st.rerun()
+        
+        elif refresh_data:
+            # Set flag for background refresh
+            st.session_state.refresh_requested = True
+            st.rerun()
+        
+        # Process pending chat question in background
+        if 'pending_chat_question' in st.session_state:
+            question = st.session_state.pending_chat_question
+            del st.session_state.pending_chat_question
+            
+            try:
+                # Process the question
+                chat_use_case = self.container.get_use_case('handle_chat')
+                response = asyncio.run(chat_use_case.execute(question))
                 
-                if submitted and user_input and user_input.strip():
-                    # Show loading indicator
-                    with st.spinner("Analyzing your AWS data..."):
-                        try:
-                            chat_use_case = self.container.get_use_case('handle_chat')
-                            response = asyncio.run(chat_use_case.execute(user_input))
-                        except Exception as e:
-                            response = f"I'm having trouble accessing your AWS data. Error: {str(e)[:100]}... Please check your AWS connection and try again."
+                # Update the last message with the actual response
+                if st.session_state.chat_history and st.session_state.chat_history[-1].get('processing'):
+                    st.session_state.chat_history[-1]['assistant'] = response
+                    st.session_state.chat_history[-1]['processing'] = False
+                
+            except Exception as e:
+                response = f"I'm having trouble accessing your AWS data. Error: {str(e)[:100]}... Please check your AWS connection and try again."
+                
+                # Update the last message with error
+                if st.session_state.chat_history and st.session_state.chat_history[-1].get('processing'):
+                    st.session_state.chat_history[-1]['assistant'] = response
+                    st.session_state.chat_history[-1]['processing'] = False
+            
+            st.rerun()
+        
+        # Process background data refresh
+        if st.session_state.get('refresh_requested', False):
+            st.session_state.refresh_requested = False
+            
+            try:
+                # Use the new use case pattern
+                usage_summary_use_case = self.container.get_use_case('get_usage_summary')
+                usage_summary = asyncio.run(usage_summary_use_case.execute())
+                
+                # Save to database
+                asyncio.run(self.repository.save_usage_summary(usage_summary))
+                
+                # Update session state with fresh data
+                st.session_state.usage_summary = usage_summary
+                st.session_state.last_refresh = datetime.now()
+                
+                st.success("🟢 Data refreshed successfully!")
+            except Exception as e:
+                st.error(f"Failed to refresh data: {str(e)[:100]}...")
+            
+            st.rerun()
+        
+        # Agent Response section - NOW AT BOTTOM
+        st.markdown("---")
+        st.markdown("### 🤖 Agent Response")
+        
+        # Determine what to show in Agent Response
+        if st.session_state.chat_history:
+            # Show chat history when user has asked questions
+            with st.container():
+                st.markdown("""
+                <div style="background-color: #ffffff; border: 2px solid #e0e0e0; border-radius: 10px; padding: 20px; max-height: 400px; overflow-y: auto; margin: 10px 0;">
+                """, unsafe_allow_html=True)
+                
+                # Show all chat exchanges with clean formatting
+                for i, chat in enumerate(st.session_state.chat_history):
+                    st.markdown(f"**💬 You:** {chat['user']}")
                     
-                    # Add to chat history
-                    st.session_state.chat_history.append({
-                        'user': user_input,
-                        'assistant': response,
-                        'timestamp': datetime.now()
-                    })
+                    # Show processing indicator or response
+                    if chat.get('processing', False):
+                        st.markdown("**🤖 Vismaya:** 🔄 Processing your question...")
+                    else:
+                        st.markdown(f"**🤖 Vismaya:** {chat['assistant']}")
                     
-                    # Rerun to show the new message
-                    st.rerun()
-            
-            # Display chat history in a styled container
-            if st.session_state.chat_history:
-                st.markdown('<div class="chat-container">', unsafe_allow_html=True)
-                
-                # Show last 2 exchanges to keep it compact
-                for i, chat in enumerate(st.session_state.chat_history[-2:]):
-                    st.markdown(f"**You:** {chat['user']}")
-                    st.markdown(f"**Vismaya:** {chat['assistant']}")
-                    if i < len(st.session_state.chat_history[-2:]) - 1:
+                    # Add separator between conversations
+                    if i < len(st.session_state.chat_history) - 1:
                         st.markdown("---")
                 
-                st.markdown('</div>', unsafe_allow_html=True)
+                st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            # Show default cost summary when no questions asked
+            try:
+                cost_insights_use_case = self.container.get_use_case('get_cost_insights')
+                analysis = asyncio.run(cost_insights_use_case.execute())
+            except Exception as e:
+                # Fallback analysis based on current metrics
+                budget_pct = metrics['budget_pct']
+                current_spend = metrics['current_spend']
+                budget = metrics['budget']
+                forecast = metrics['forecast']
                 
-                # Action buttons
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("🗑️ Clear Chat", key="clear_chat"):
-                        st.session_state.chat_history = []
-                        st.rerun()
-                with col2:
-                    if st.button("🔄 Refresh Data", key="refresh_data"):
-                        # Force refresh of usage data
-                        if 'data_loaded' in st.session_state:
-                            del st.session_state.data_loaded
-                        st.rerun()
-            else:
-                # Show welcome message with examples - more compact
-                st.markdown('<div class="chat-container">', unsafe_allow_html=True)
-                st.markdown("""**Vismaya:** Hi! I'm your AI FinOps assistant.
+                if current_spend == 0:
+                    analysis = f"""Welcome to Vismaya DemandOps! 
 
-**Quick questions:**
-• Current spending & budget status
-• Service costs & optimization tips
-• EC2, RDS, S3 usage details
-• Cost forecasts & recommendations
+Your current AWS spending is $0.00 with a budget limit of ${budget:.0f}.
 
-Use the buttons above or ask me directly!""")
-                st.markdown('</div>', unsafe_allow_html=True)
+Getting Started:
+• Your dashboard is loading with default values
+• Real AWS data will populate automatically
+• Set up cost monitoring and alerts
+• Explore optimization opportunities"""
+                elif budget_pct > 80:
+                    overspend = forecast - budget
+                    analysis = f"""You have spent ${current_spend:,.2f} of ${budget:,.0f} budget ({budget_pct:.1f}%).
+
+At this rate, you'll overshoot by ${overspend:,.2f}.
+
+Suggested Actions:
+• Review current AWS usage immediately
+• Consider cost optimization strategies
+• Set up budget alerts for monitoring"""
+                else:
+                    analysis = f"""You're at {budget_pct:.1f}% of your ${budget:,.0f} budget. Good progress!
+
+Recommendations:
+• Monitor spending patterns regularly
+• Consider Reserved Instances for steady workloads
+• Set up proactive cost alerts"""
+            
+            # Display default analysis without white block
+            st.markdown(f"**🤖 Vismaya:** {analysis}")
+    
+    def render_forecasting_ai_assistant(self, metrics):
+        """Render Forecasting AI assistant section for cost estimation queries"""
+        
+        # Initialize forecasting chat history
+        if 'forecasting_chat_history' not in st.session_state:
+            st.session_state.forecasting_chat_history = []
+        
+        # Show data context indicator
+        try:
+            usage_summary_use_case = self.container.get_use_case('get_usage_summary')
+            usage_summary = asyncio.run(usage_summary_use_case.execute())
+            
+            # Data freshness indicator
+            if usage_summary.last_updated:
+                time_diff = datetime.now() - usage_summary.last_updated
+                if time_diff.total_seconds() < 300:  # Less than 5 minutes
+                    st.success("🟢 Real-time AWS pricing data available")
+                else:
+                    st.warning("🟡 Using cached data (refresh for latest pricing)")
+            
+        except Exception:
+            st.info("🔵 Using available data for cost estimation")
+        
+        # Forecasting AI Chat Input Section
+        st.markdown("### 💰 Ask About AWS Resource Costs")
+        
+        # Example queries for user guidance
+        with st.expander("💡 Example Queries", expanded=False):
+            st.markdown("""
+            **Try asking:**
+            • "What would 2 t3.medium EC2 instances cost for 3 months?"
+            • "Cost of a db.t3.micro RDS MySQL instance for 6 months"
+            • "How much for 500 GB of EBS GP3 storage for 1 year?"
+            • "Price of m5.large instance in us-west-2 for 2 months"
+            • "Cost comparison: t3.small vs t3.medium for 90 days"
+            """)
+        
+        # Chat input form with horizontal buttons
+        with st.form("forecasting_chat_form", clear_on_submit=True):
+            user_input = st.text_input(
+                "", 
+                placeholder="Ask about AWS resource costs, pricing comparisons, or budget impact...",
+                key="forecasting_chat_input_form"
+            )
+            
+            # Horizontal button layout
+            col1, col2, col3, col4 = st.columns([2, 1.5, 1.5, 1])
+            with col1:
+                submitted = st.form_submit_button("💰 Get Cost Estimate", type="primary", use_container_width=True)
+            with col2:
+                clear_chat = st.form_submit_button("🗑️ Clear", use_container_width=True)
+            with col3:
+                help_button = st.form_submit_button("❓ Help", use_container_width=True)
+            with col4:
+                refresh_pricing = st.form_submit_button("🔄 Refresh", use_container_width=True)
+            
+        # Handle form submissions
+        if submitted and user_input and user_input.strip():
+            # Add user message immediately to show responsiveness
+            st.session_state.forecasting_chat_history.append({
+                'user': user_input,
+                'assistant': "🤖 Fetching real-time AWS pricing data...",
+                'timestamp': datetime.now(),
+                'processing': True
+            })
+            
+            # Store the question for background processing
+            st.session_state.pending_forecasting_question = user_input
+            st.rerun()
+        
+        elif clear_chat:
+            st.session_state.forecasting_chat_history = []
+            st.rerun()
+        
+        elif help_button:
+            # Add help response to chat
+            help_response = """🤖 **Forecasting AI Assistant Help**
+
+I can help you estimate AWS resource costs accurately using real pricing data.
+
+**Supported Resources:**
+• EC2 instances (all types)
+• RDS databases (MySQL, PostgreSQL, etc.)
+• EBS storage (GP2, GP3, IO1, IO2)
+• S3 storage
+• Lambda functions
+
+**Example Queries:**
+• "What would 2 t3.medium instances cost for 3 months?"
+• "Price of 100 GB EBS storage for 6 months"
+• "Cost comparison: m5.large vs c5.large"
+
+**Tips:**
+• Specify instance types (e.g., t3.micro, m5.large)
+• Include time periods (e.g., 2 months, 90 days)
+• Mention regions for accurate pricing
+• Ask about budget impact to see spending effects
+
+Just ask me about any AWS resource cost!"""
+            
+            st.session_state.forecasting_chat_history.append({
+                'user': 'Help',
+                'assistant': help_response,
+                'timestamp': datetime.now(),
+                'processing': False
+            })
+            st.rerun()
+        
+        elif refresh_pricing:
+            # Clear any pricing cache and refresh
+            st.session_state.pricing_cache_cleared = True
+            st.success("🔄 Pricing cache cleared - next query will fetch fresh data")
+            st.rerun()
+        
+        # Process pending forecasting question in background
+        if 'pending_forecasting_question' in st.session_state:
+            question = st.session_state.pending_forecasting_question
+            del st.session_state.pending_forecasting_question
+            
+            try:
+                # Process the forecasting question with the new AI assistant
+                forecasting_ai = self.container.get('forecasting_ai_assistant')
+                
+                # Create forecasting context
+                from src.core.models import ForecastingContext
+                context = ForecastingContext()
+                
+                # Add current usage and budget info if available
+                if hasattr(st.session_state, 'usage_summary') and st.session_state.usage_summary:
+                    context.current_usage = st.session_state.usage_summary
+                    context.budget_info = st.session_state.usage_summary.budget_info
+                    context.cost_forecast = st.session_state.usage_summary.cost_forecast
+                
+                # Get response from forecasting AI
+                response = asyncio.run(forecasting_ai.chat_response(question, context))
+                
+                # Update the last message with the response
+                if st.session_state.forecasting_chat_history and st.session_state.forecasting_chat_history[-1].get('processing'):
+                    st.session_state.forecasting_chat_history[-1]['assistant'] = response
+                    st.session_state.forecasting_chat_history[-1]['processing'] = False
+                
+            except Exception as e:
+                response = f"I'm having trouble processing your cost estimation request. Error: {str(e)[:100]}... Please try again."
+                
+                # Update the last message with error
+                if st.session_state.forecasting_chat_history and st.session_state.forecasting_chat_history[-1].get('processing'):
+                    st.session_state.forecasting_chat_history[-1]['assistant'] = response
+                    st.session_state.forecasting_chat_history[-1]['processing'] = False
+            
+            st.rerun()
+        
+        # Forecasting Agent Response section
+        st.markdown("---")
+        st.markdown("### 🤖 Cost Estimation Response")
+        
+        # Determine what to show in Agent Response
+        if st.session_state.forecasting_chat_history:
+            # Show chat history when user has asked questions
+            with st.container():
+                st.markdown("""
+                <div style="background-color: #ffffff; border: 2px solid #e0e0e0; border-radius: 10px; padding: 20px; max-height: 400px; overflow-y: auto; margin: 10px 0;">
+                """, unsafe_allow_html=True)
+                
+                # Show all chat exchanges with clean formatting
+                for i, chat in enumerate(st.session_state.forecasting_chat_history):
+                    st.markdown(f"**💬 You:** {chat['user']}")
+                    
+                    # Show processing indicator or response
+                    if chat.get('processing', False):
+                        st.markdown("**🤖 Vismaya:** 🔄 Fetching real-time AWS pricing...")
+                    else:
+                        st.markdown(f"**🤖 Vismaya:** {chat['assistant']}")
+                    
+                    # Add separator between conversations
+                    if i < len(st.session_state.forecasting_chat_history) - 1:
+                        st.markdown("---")
+                
+                st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            # Show default forecasting introduction when no questions asked
+            try:
+                # Get current budget context
+                budget_info = st.session_state.usage_summary.budget_info if hasattr(st.session_state, 'usage_summary') else None
+                
+                if budget_info:
+                    intro_analysis = f"""Welcome to the Forecasting AI Assistant! 🤖
+
+**Your Current Budget Context:**
+• Current spend: ${budget_info.current_spend:.2f}
+• Budget limit: ${budget_info.warning_limit:.2f}
+• Remaining budget: ${budget_info.remaining_budget:.2f}
+• Budget utilization: {budget_info.utilization_percentage:.1f}%
+
+**I can help you with:**
+💰 **Accurate Cost Estimates** - Real AWS pricing data, no guesswork
+📊 **Budget Impact Analysis** - See how new resources affect your budget
+🔍 **Price Comparisons** - Compare different instance types and pricing models
+⏱️ **Duration Planning** - Costs for different time periods
+
+**Just ask me about any AWS resource!**
+Example: "What would a t3.medium instance cost for 2 months?"
+
+*All pricing data comes directly from AWS APIs for accuracy.*"""
+                else:
+                    intro_analysis = """Welcome to the Forecasting AI Assistant! 🤖
+
+I can help you estimate AWS resource costs accurately using real-time pricing data.
+
+**Ask me about:**
+• EC2 instance costs (any type, any duration)
+• RDS database pricing
+• EBS storage costs
+• S3 storage pricing
+• Lambda function costs
+
+**Example queries:**
+• "Cost of 2 t3.medium instances for 3 months"
+• "Price comparison: m5.large vs c5.large"
+• "How much for 500 GB EBS storage?"
+
+*All estimates use official AWS pricing - no hallucination!*"""
+                
+            except Exception:
+                intro_analysis = """Welcome to the Forecasting AI Assistant! 🤖
+
+I provide accurate AWS cost estimates using real-time pricing data.
+
+Ask me about any AWS resource costs and I'll give you precise estimates with budget impact analysis.
+
+Try: "What would a t3.medium instance cost for 2 months?"
+
+*Powered by official AWS Pricing API*"""
+            
+            # Display default analysis
+            st.markdown(f"**🤖 Vismaya:** {intro_analysis}")
     
     def render_current_usage_tab(self):
         """Render the Current Usage tab content"""
@@ -975,6 +1296,9 @@ Use the buttons above or ask me directly!""")
         
         # Top metrics row
         self.render_metrics_row(metrics)
+        
+        # Budget alerts section
+        self.render_budget_alerts()
         
         # Show demo mode toggle if no resources
         if not metrics.get('has_resources', True):
@@ -1008,22 +1332,154 @@ Use the buttons above or ask me directly!""")
             # AI Assistant section
             self.render_ai_assistant(metrics)
     
+    def render_detailed_billing_tab(self):
+        """Render the Detailed Billing tab content"""
+        from src.ui.detailed_billing import DetailedBillingUI
+        DetailedBillingUI.render_complete_billing_tab()
+    
     def render_detailed_usage_tab(self):
-        """Render the Detailed Usage tab content"""
-        st.subheader("Detailed AWS Resource Usage")
+        """Render the Enhanced Detailed Usage tab with proper cost breakdown"""
+        st.subheader("📋 Detailed Cost Breakdown")
         
-        # Add refresh button - more compact
+        # Add refresh button
         col1, col2 = st.columns([1, 2])
         with col1:
             if st.button("🔄 Refresh", key="refresh_detailed"):
+                if 'data_loaded' in st.session_state:
+                    del st.session_state.data_loaded
                 st.rerun()
-        with col2:
-            auto_refresh = st.checkbox("Auto-refresh", value=False)
         
-        if auto_refresh:
-            import time
-            time.sleep(30)
-            st.rerun()
+        try:
+            if not hasattr(st.session_state, 'usage_summary') or st.session_state.usage_summary is None:
+                st.warning("Loading usage data...")
+                return
+            
+            usage_summary = st.session_state.usage_summary
+            
+            # Cost Summary Section
+            st.markdown("### 💰 Cost Summary")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("Total Cost", f"${usage_summary.budget_info.current_spend:.2f}")
+            
+            with col2:
+                # Calculate tax information
+                total_pre_tax = sum(getattr(sc.cost, 'pre_tax_amount', 0) or 0 for sc in usage_summary.service_costs)
+                if total_pre_tax > 0:
+                    st.metric("Pre-tax Cost", f"${total_pre_tax:.2f}")
+                else:
+                    st.metric("Services", f"{len([sc for sc in usage_summary.service_costs if sc.cost.amount > 0])}")
+            
+            with col3:
+                total_tax = sum(getattr(sc.cost, 'tax_amount', 0) or 0 for sc in usage_summary.service_costs)
+                if total_tax > 0:
+                    st.metric("Tax Amount", f"${total_tax:.2f}")
+                else:
+                    st.metric("Free Tier", f"{len([sc for sc in usage_summary.service_costs if sc.cost.amount == 0])}")
+            
+            with col4:
+                utilization = usage_summary.budget_info.utilization_percentage
+                st.metric("Budget Used", f"{utilization:.1f}%")
+            
+            st.markdown("---")
+            
+            # Service Breakdown Section
+            st.markdown("### 🔍 Service-by-Service Breakdown")
+            
+            # Filter and sort services
+            paid_services = [sc for sc in usage_summary.service_costs if sc.cost.amount > 0]
+            free_services = [sc for sc in usage_summary.service_costs if sc.cost.amount == 0]
+            
+            paid_services.sort(key=lambda x: x.cost.amount, reverse=True)
+            
+            # Paid Services
+            if paid_services:
+                st.markdown("#### 💳 Paid Services")
+                
+                for service_cost in paid_services:
+                    service_name = getattr(service_cost.cost, 'service_name', service_cost.service_type.value)
+                    amount = service_cost.cost.amount
+                    usage_qty = getattr(service_cost.cost, 'usage_quantity', None)
+                    pre_tax = getattr(service_cost.cost, 'pre_tax_amount', None)
+                    tax = getattr(service_cost.cost, 'tax_amount', None)
+                    
+                    # Create expandable section for each service
+                    with st.expander(f"💳 {service_name} - ${amount:.6f}"):
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.write(f"**Total Cost:** ${amount:.6f}")
+                            if pre_tax and pre_tax != amount:
+                                st.write(f"**Pre-tax:** ${pre_tax:.6f}")
+                            if tax and tax > 0:
+                                st.write(f"**Tax:** ${tax:.6f}")
+                        
+                        with col2:
+                            if usage_qty and usage_qty > 0:
+                                cost_per_unit = amount / usage_qty
+                                st.write(f"**Usage:** {usage_qty:.0f} units")
+                                st.write(f"**Cost per Unit:** ${cost_per_unit:.6f}")
+                            
+                            # Calculate percentage of total
+                            percentage = (amount / usage_summary.budget_info.current_spend) * 100
+                            st.write(f"**% of Total:** {percentage:.1f}%")
+            
+            # Free Tier Services
+            if free_services:
+                st.markdown("#### 💸 Free Tier Services")
+                
+                free_service_names = []
+                for service_cost in free_services:
+                    service_name = getattr(service_cost.cost, 'service_name', service_cost.service_type.value)
+                    usage_qty = getattr(service_cost.cost, 'usage_quantity', None)
+                    
+                    if usage_qty and usage_qty > 0:
+                        free_service_names.append(f"{service_name} ({usage_qty:.0f} units)")
+                    else:
+                        free_service_names.append(service_name)
+                
+                # Show free services in a nice format
+                if free_service_names:
+                    st.success(f"**Free Services:** {', '.join(free_service_names[:5])}")
+                    if len(free_service_names) > 5:
+                        st.info(f"...and {len(free_service_names) - 5} more free services")
+            
+            # Cost Analysis Section
+            st.markdown("---")
+            st.markdown("### 📊 Cost Analysis")
+            
+            if paid_services:
+                # Top cost drivers
+                top_service = paid_services[0]
+                top_percentage = (top_service.cost.amount / usage_summary.budget_info.current_spend) * 100
+                
+                st.info(f"**Top Cost Driver:** {getattr(top_service.cost, 'service_name', top_service.service_type.value)} "
+                       f"(${top_service.cost.amount:.6f} - {top_percentage:.1f}% of total)")
+                
+                # Cost distribution chart
+                if len(paid_services) > 1:
+                    import plotly.express as px
+                    import pandas as pd
+                    
+                    chart_data = []
+                    for sc in paid_services[:10]:  # Top 10 services
+                        service_name = getattr(sc.cost, 'service_name', sc.service_type.value)
+                        chart_data.append({
+                            'Service': service_name[:30],  # Truncate long names
+                            'Cost': sc.cost.amount
+                        })
+                    
+                    df = pd.DataFrame(chart_data)
+                    fig = px.pie(df, values='Cost', names='Service', 
+                               title="Cost Distribution by Service")
+                    fig.update_traces(textposition='inside', textinfo='percent+label')
+                    st.plotly_chart(fig, use_container_width=True)
+        
+        except Exception as e:
+            st.error(f"Error loading detailed usage data: {str(e)}")
+            st.info("Please refresh the page or check your AWS connection.")
         
         try:
             # Get detailed resource information using the new use case
@@ -1328,72 +1784,293 @@ Use the buttons above or ask me directly!""")
                 """)
     
     def render_forecast_tab(self):
-        """Render the Forecast tab content"""
-        st.subheader("Cost Forecasting & Scenarios")
+        """Render the Enhanced Forecast tab with organic growth projections and timeline"""
+        st.subheader("📈 Cost Forecasting & Budget Timeline")
         
-        # Scenario planning
-        st.markdown("### What-If Scenarios")
+        # Get real metrics for context
+        metrics = self.calculate_metrics()
         
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("**Add Resources:**")
-            new_ec2 = st.number_input("Additional EC2 instances", min_value=0, max_value=10, value=0)
-            storage_gb = st.number_input("Additional storage (GB)", min_value=0, max_value=1000, value=0)
+        try:
+            if not hasattr(st.session_state, 'usage_summary') or st.session_state.usage_summary is None:
+                st.warning("Loading forecast data...")
+                return
             
-        with col2:
-            st.markdown("**Impact:**")
+            usage_summary = st.session_state.usage_summary
             
-            # Use the new scenario analysis use case
-            try:
-                scenario = ScenarioInput(
-                    additional_ec2_instances=new_ec2,
-                    additional_storage_gb=storage_gb
+            # Import forecasting service
+            from src.services.budget_forecasting_service import BudgetForecastingService
+            forecasting_service = BudgetForecastingService()
+            
+            # Generate timeline and projections
+            timeline = forecasting_service.generate_budget_timeline(
+                usage_summary.budget_info, 
+                usage_summary.cost_forecast
+            )
+            projections = forecasting_service.generate_monthly_projections(
+                usage_summary.cost_forecast, 
+                usage_summary.budget_info
+            )
+            
+            # Current Growth Analysis
+            st.markdown("### 📊 Current Growth Analysis")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("Daily Cost", f"${timeline['daily_cost_estimate']:.4f}")
+            
+            with col2:
+                growth_rate = timeline['monthly_growth_rate']
+                delta_color = "normal" if abs(growth_rate) < 10 else "inverse"
+                st.metric("Monthly Growth", f"{growth_rate:.1f}%", delta=f"{growth_rate:.1f}%")
+            
+            with col3:
+                st.metric("Next Month", f"${timeline['monthly_projection']:.2f}")
+            
+            with col4:
+                safe_budget = timeline.get('safe_daily_budget', 0)
+                st.metric("Safe Daily Budget", f"${safe_budget:.4f}")
+            
+            st.markdown("---")
+            
+            # Budget Timeline
+            st.markdown("### ⏰ Budget Timeline")
+            
+            col1, col2 = st.columns(2)
+            
+            # Only show timeline sections if there's actually a risk
+            current_spend = usage_summary.budget_info.current_spend
+            warning_limit = usage_summary.budget_info.warning_limit
+            critical_limit = usage_summary.budget_info.maximum_limit
+            
+            # Check if we're already over limits
+            already_over_warning = current_spend > warning_limit
+            already_over_critical = current_spend > critical_limit
+            
+            # Check if we'll hit limits with current growth
+            will_hit_warning = timeline.get('days_to_warning') and timeline['days_to_warning'] <= 365
+            will_hit_critical = timeline.get('days_to_critical') and timeline['days_to_critical'] <= 365
+            
+            # Only show sections if there's something meaningful to display
+            if already_over_warning or already_over_critical or will_hit_warning or will_hit_critical:
+                
+                col1, col2 = st.columns(2)
+                
+                # Warning Limit Section
+                if already_over_warning or will_hit_warning:
+                    with col1:
+                        st.markdown("#### ⚠️ Warning Limit Status")
+                        
+                        if already_over_warning:
+                            overage = current_spend - warning_limit
+                            st.error(f"🚨 **Over Warning Limit!**")
+                            st.write(f"Current: ${current_spend:.2f}")
+                            st.write(f"Warning Limit: ${warning_limit:.2f}")
+                            st.write(f"**Overage:** ${overage:.2f}")
+                        
+                        elif will_hit_warning:
+                            days = timeline['days_to_warning']
+                            date = timeline['warning_date']
+                            
+                            if days <= 7:
+                                st.error(f"🚨 **{days} days** until warning limit")
+                            elif days <= 30:
+                                st.warning(f"⚠️ **{days} days** until warning limit")
+                            else:
+                                st.info(f"📅 **{days} days** until warning limit")
+                            
+                            st.write(f"**Target:** ${warning_limit:.2f}")
+                            st.write(f"**Date:** {date}")
+                
+                # Critical Limit Section  
+                if already_over_critical or will_hit_critical:
+                    with col2:
+                        st.markdown("#### 🔴 Critical Limit Status")
+                        
+                        if already_over_critical:
+                            overage = current_spend - critical_limit
+                            st.error(f"🔴 **Over Critical Limit!**")
+                            st.write(f"Current: ${current_spend:.2f}")
+                            st.write(f"Critical Limit: ${critical_limit:.2f}")
+                            st.write(f"**Overage:** ${overage:.2f}")
+                        
+                        elif will_hit_critical:
+                            days = timeline['days_to_critical']
+                            date = timeline['critical_date']
+                            
+                            if days <= 7:
+                                st.error(f"🔴 **{days} days** until critical limit")
+                            elif days <= 30:
+                                st.warning(f"⚠️ **{days} days** until critical limit")
+                            else:
+                                st.info(f"📅 **{days} days** until critical limit")
+                            
+                            st.write(f"**Target:** ${critical_limit:.2f}")
+                            st.write(f"**Date:** {date}")
+            
+            else:
+                # Show positive message when everything is good
+                st.success("✅ **Budget Status: Healthy**")
+                st.info(f"💰 Current spending (${current_spend:.2f}) is well within limits. "
+                       f"At current growth rate, no budget concerns expected.")
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    remaining_warning = warning_limit - current_spend
+                    st.metric("Until Warning", f"${remaining_warning:.2f}")
+                with col2:
+                    remaining_critical = critical_limit - current_spend
+                    st.metric("Until Critical", f"${remaining_critical:.2f}")
+                with col3:
+                    utilization = (current_spend / warning_limit) * 100
+                    st.metric("Budget Used", f"{utilization:.1f}%")
+            
+            # Monthly Projections Chart
+            st.markdown("---")
+            st.markdown("### 📅 6-Month Projections")
+            
+            if projections['monthly_projections']:
+                import plotly.graph_objects as go
+                import pandas as pd
+                
+                # Prepare data for chart
+                months = [f"Month +{p['month']}" for p in projections['monthly_projections']]
+                costs = [p['projected_cost'] for p in projections['monthly_projections']]
+                statuses = [p['status'] for p in projections['monthly_projections']]
+                
+                # Create chart
+                fig = go.Figure()
+                
+                # Add cost line
+                fig.add_trace(go.Scatter(
+                    x=months,
+                    y=costs,
+                    mode='lines+markers',
+                    name='Projected Cost',
+                    line=dict(color='blue', width=3),
+                    marker=dict(size=8)
+                ))
+                
+                # Add warning limit line
+                warning_limit = usage_summary.budget_info.warning_limit
+                fig.add_hline(y=warning_limit, line_dash="dash", line_color="orange", 
+                             annotation_text=f"Warning Limit (${warning_limit})")
+                
+                # Add critical limit line
+                critical_limit = usage_summary.budget_info.maximum_limit
+                fig.add_hline(y=critical_limit, line_dash="dash", line_color="red", 
+                             annotation_text=f"Critical Limit (${critical_limit})")
+                
+                fig.update_layout(
+                    title="Cost Projection Timeline",
+                    xaxis_title="Time Period",
+                    yaxis_title="Cost ($)",
+                    height=400
                 )
                 
-                scenario_use_case = self.container.get_use_case('analyze_scenario')
-                result = asyncio.run(scenario_use_case.execute(scenario))
+                st.plotly_chart(fig, use_container_width=True)
                 
-                st.metric("Additional Monthly Cost", f"${result.cost_difference:.2f}")
-                st.metric("New Total", f"${result.projected_monthly_cost:.2f}")
+                # Show projection table
+                col1, col2 = st.columns(2)
                 
-                if result.exceeds_budget:
-                    st.error(f"⚠️ Would exceed budget by ${result.budget_impact:.2f}")
-                else:
-                    st.success("✅ Within budget limits")
-                
-                # Show recommendations
-                if result.recommendations:
-                    st.markdown("**Recommendations:**")
-                    for rec in result.recommendations:
-                        st.markdown(f"• {rec}")
+                with col1:
+                    st.markdown("#### 📊 Projection Summary")
+                    for proj in projections['monthly_projections'][:3]:
+                        status_color = {
+                            'HEALTHY': 'success',
+                            'CAUTION': 'warning', 
+                            'WARNING': 'warning',
+                            'CRITICAL': 'error'
+                        }.get(proj['status'], 'info')
                         
-            except Exception as e:
-                st.error(f"Error analyzing scenario: {e}")
-        
-        # Forecast chart
-        st.markdown("### 6-Month Forecast")
-        
-        # Calculate additional cost from the scenario inputs
-        additional_cost = (new_ec2 * 120) + (storage_gb * 0.10)
-        
-        months = ['Current', 'Month+1', 'Month+2', 'Month+3', 'Month+4', 'Month+5', 'Month+6']
-        baseline = [12500, 13200, 13800, 14500, 15200, 15800, 16500]
-        with_changes = [12500 + additional_cost] * 7
-        
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=months, y=baseline, name='Baseline Forecast', line=dict(color='blue')))
-        fig.add_trace(go.Scatter(x=months, y=with_changes, name='With Changes', line=dict(color='red', dash='dash')))
-        fig.add_hline(y=Config.DEFAULT_BUDGET, line_dash="dot", line_color="green", annotation_text="Budget Limit")
-        
-        fig.update_layout(
-            title="Cost Forecast Comparison",
-            xaxis_title="Time Period",
-            yaxis_title="Cost ($)",
-            height=400
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
+                        if status_color == 'success':
+                            st.success(f"Month +{proj['month']}: ${proj['projected_cost']:.2f} {proj['status_emoji']}")
+                        elif status_color == 'warning':
+                            st.warning(f"Month +{proj['month']}: ${proj['projected_cost']:.2f} {proj['status_emoji']}")
+                        elif status_color == 'error':
+                            st.error(f"Month +{proj['month']}: ${proj['projected_cost']:.2f} {proj['status_emoji']}")
+                        else:
+                            st.info(f"Month +{proj['month']}: ${proj['projected_cost']:.2f} {proj['status_emoji']}")
+                
+                with col2:
+                    st.markdown("#### 🎯 Recommended Actions")
+                    for action in timeline['recommended_actions'][:4]:
+                        st.write(f"• {action}")
+            
+            # What-If Scenarios Section
+            st.markdown("---")
+            st.markdown("### 🔮 What-If Scenarios")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("**Add Resources:**")
+                new_ec2 = st.number_input("Additional EC2 instances", min_value=0, max_value=10, value=0)
+                storage_gb = st.number_input("Additional storage (GB)", min_value=0, max_value=1000, value=0)
+                
+            with col2:
+                st.markdown("**Impact:**")
+                
+                # Use the scenario analysis use case
+                try:
+                    from src.core.models import ScenarioInput
+                    scenario = ScenarioInput(
+                        additional_ec2_instances=new_ec2,
+                        additional_storage_gb=storage_gb
+                    )
+                    
+                    scenario_use_case = self.container.get_use_case('analyze_scenario')
+                    result = asyncio.run(scenario_use_case.execute(scenario))
+                    
+                    st.metric("Additional Monthly Cost", f"${result.cost_difference:.2f}")
+                    st.metric("New Total", f"${result.projected_monthly_cost:.2f}")
+                    
+                    if result.budget_impact > 0:
+                        st.error(f"⚠️ Would exceed budget by ${result.budget_impact:.2f}")
+                    else:
+                        st.success("✅ Within budget limits")
+                    
+                    # Show recommendations
+                    if result.recommendations:
+                        st.markdown("**Recommendations:**")
+                        for rec in result.recommendations:
+                            st.markdown(f"• {rec}")
+                        
+                except Exception as e:
+                    st.error(f"Error analyzing scenario: {e}")
+            
+            # Forecast chart
+            st.markdown("### 6-Month Forecast")
+            
+            # Calculate additional cost from the scenario inputs
+            additional_cost = (new_ec2 * 120) + (storage_gb * 0.10)
+            
+            months = ['Current', 'Month+1', 'Month+2', 'Month+3', 'Month+4', 'Month+5', 'Month+6']
+            baseline = [12500, 13200, 13800, 14500, 15200, 15800, 16500]
+            with_changes = [12500 + additional_cost] * 7
+            
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=months, y=baseline, name='Baseline Forecast', line=dict(color='blue')))
+            fig.add_trace(go.Scatter(x=months, y=with_changes, name='With Changes', line=dict(color='red', dash='dash')))
+            fig.add_hline(y=Config.DEFAULT_BUDGET, line_dash="dot", line_color="green", annotation_text="Budget Limit")
+            
+            fig.update_layout(
+                title="Cost Forecast Comparison",
+                xaxis_title="Time Period",
+                yaxis_title="Cost ($)",
+                height=400
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Add AI Assistant section for forecasting
+            st.markdown("---")
+            st.markdown("### 🤖 Forecasting AI Assistant")
+            self.render_forecasting_ai_assistant(metrics)
+            
+        except Exception as e:
+            st.error(f"Error loading forecast data: {e}")
+            st.info("Please refresh the page or check your AWS connection.")
     
     def render_historical_tab(self):
         """Render the Historical Data tab content"""
@@ -1417,10 +2094,10 @@ Use the buttons above or ask me directly!""")
         with col1:
             st.markdown("### Budget Configuration")
             new_budget = st.number_input("Monthly Budget ($)", 
-                                       min_value=100, 
+                                       min_value=10, 
                                        max_value=100000, 
                                        value=Config.DEFAULT_BUDGET,
-                                       step=100)
+                                       step=10)
             
             if st.button("Update Budget"):
                 st.success(f"Budget updated to ${new_budget:,}")
@@ -1445,6 +2122,47 @@ Use the buttons above or ask me directly!""")
         - Port: {Config.PORT}
         """)
     
+    def render_budget_alerts(self):
+        """Render budget alerts and warnings"""
+        try:
+            from src.services.budget_alert_service import BudgetAlertService
+            
+            if not hasattr(st.session_state, 'usage_summary') or st.session_state.usage_summary is None:
+                return
+            
+            usage_summary = st.session_state.usage_summary
+            alert_service = BudgetAlertService()
+            
+            # Get budget alerts
+            alerts = alert_service.check_budget_status(usage_summary.budget_info)
+            
+            # Display alerts based on severity
+            for alert in alerts:
+                if alert.level == "CRITICAL":
+                    st.error(f"🔴 **CRITICAL BUDGET ALERT**\n\n{alert.message}")
+                elif alert.level == "WARNING":
+                    st.warning(f"🚨 **BUDGET WARNING**\n\n{alert.message}")
+                elif alert.level == "CAUTION":
+                    st.info(f"⚠️ **BUDGET CAUTION**\n\n{alert.message}")
+                # Don't show INFO level alerts to avoid clutter
+            
+            # Show budget dashboard for non-healthy status
+            if usage_summary.budget_info.budget_status != "HEALTHY":
+                with st.expander("📊 Budget Details", expanded=True):
+                    dashboard_text = alert_service.format_budget_dashboard(usage_summary.budget_info)
+                    st.markdown(dashboard_text)
+                    
+                    # Show recommendations
+                    recommendations = alert_service.get_budget_recommendations(usage_summary.budget_info)
+                    if recommendations:
+                        st.markdown("**💡 Immediate Actions:**")
+                        for rec in recommendations[:3]:  # Show top 3 recommendations
+                            st.markdown(f"• {rec}")
+            
+        except Exception as e:
+            # Silently fail to avoid breaking the dashboard
+            pass
+    
     def run(self):
         """Main dashboard runner"""
         # Check if credentials are needed
@@ -1457,7 +2175,7 @@ Use the buttons above or ask me directly!""")
         self.load_data()
         
         # Navigation
-        tab1, tab2, tab3, tab4, tab5 = self.render_navigation()
+        tab1, tab2, tab3, tab4, tab5, tab6 = self.render_navigation()
         
         with tab1:
             self.render_current_usage_tab()
@@ -1466,12 +2184,15 @@ Use the buttons above or ask me directly!""")
             self.render_detailed_usage_tab()
         
         with tab3:
-            self.render_forecast_tab()
+            self.render_detailed_billing_tab()
         
         with tab4:
-            self.render_historical_tab()
+            self.render_forecast_tab()
         
         with tab5:
+            self.render_historical_tab()
+        
+        with tab6:
             self.render_settings_tab()
 
 # Run the dashboard

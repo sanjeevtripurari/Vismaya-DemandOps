@@ -21,35 +21,109 @@ class AWSSessionFactory:
         self._session = None
     
     def create_session(self) -> boto3.Session:
-        """Create AWS session with appropriate authentication"""
+        """Create AWS session with appropriate authentication for different environments"""
         try:
-            if self._config.use_sso():
-                logger.info("Creating AWS session with SSO/Profile authentication")
-                session = boto3.Session(
-                    profile_name=self._config.AWS_PROFILE,
-                    region_name=self._config.AWS_REGION
-                )
-            else:
-                logger.info("Creating AWS session with explicit credentials")
+            # Priority order for AWS credentials:
+            # 1. Explicit credentials (for local development)
+            # 2. IAM roles (for AWS deployment)
+            # 3. SSO/Profile (for local development)
+            # 4. Environment variables (for Docker)
+            
+            session = None
+            auth_method = "unknown"
+            
+            # Try explicit credentials first (local development)
+            if (hasattr(self._config, 'AWS_ACCESS_KEY_ID') and 
+                self._config.AWS_ACCESS_KEY_ID and 
+                len(self._config.AWS_ACCESS_KEY_ID.strip()) > 10):
+                
+                logger.info("Using explicit AWS credentials")
                 session = boto3.Session(
                     aws_access_key_id=self._config.AWS_ACCESS_KEY_ID,
                     aws_secret_access_key=self._config.AWS_SECRET_ACCESS_KEY,
                     aws_session_token=self._config.AWS_SESSION_TOKEN,
                     region_name=self._config.AWS_REGION
                 )
+                auth_method = "explicit_credentials"
+                
+            # Try IAM role (AWS deployment - EC2, ECS, Lambda)
+            elif self._is_running_on_aws():
+                logger.info("Detected AWS environment, using IAM role")
+                session = boto3.Session(region_name=self._config.AWS_REGION)
+                auth_method = "iam_role"
+                
+            # Try SSO/Profile (local development)
+            elif self._config.use_sso():
+                logger.info("Using AWS SSO/Profile authentication")
+                session = boto3.Session(
+                    profile_name=self._config.AWS_PROFILE,
+                    region_name=self._config.AWS_REGION
+                )
+                auth_method = "sso_profile"
+                
+            # Try default session (environment variables, instance metadata)
+            else:
+                logger.info("Using default AWS session (env vars or instance metadata)")
+                session = boto3.Session(region_name=self._config.AWS_REGION)
+                auth_method = "default"
             
             # Test the session
             sts = session.client('sts')
             identity = sts.get_caller_identity()
-            logger.info(f"AWS session created successfully - Account: {identity.get('Account', 'Unknown')}")
+            
+            # Get user identifier - prefer email if available
+            user_identifier = getattr(self._config, 'AWS_USER_EMAIL', None)
+            if not user_identifier:
+                user_identifier = identity.get('Arn', 'Unknown').split('/')[-1]
+            
+            logger.info(f"✅ AWS session created successfully")
+            logger.info(f"   Auth Method: {auth_method}")
+            logger.info(f"   Account: {identity.get('Account', 'Unknown')}")
+            logger.info(f"   Region: {self._config.AWS_REGION}")
+            logger.info(f"   User: {user_identifier}")
             
             self._session = session
             return session
             
         except Exception as e:
-            logger.warning(f"Error creating AWS session: {e}. Using default session.")
-            self._session = boto3.Session(region_name=self._config.AWS_REGION)
-            return self._session
+            logger.error(f"❌ Failed to create AWS session: {e}")
+            logger.error("   Check your AWS credentials and permissions")
+            raise Exception(f"AWS authentication failed: {str(e)}")
+    
+    def _is_running_on_aws(self) -> bool:
+        """Detect if running on AWS (EC2, ECS, Lambda, etc.)"""
+        try:
+            import os
+            import requests
+            
+            # Check for AWS environment variables
+            aws_env_vars = [
+                'AWS_EXECUTION_ENV',  # Lambda
+                'ECS_CONTAINER_METADATA_URI',  # ECS
+                'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI'  # ECS
+            ]
+            
+            for env_var in aws_env_vars:
+                if os.environ.get(env_var):
+                    logger.info(f"Detected AWS environment: {env_var}")
+                    return True
+            
+            # Try to access EC2 instance metadata (with timeout)
+            try:
+                response = requests.get(
+                    'http://169.254.169.254/latest/meta-data/instance-id',
+                    timeout=2
+                )
+                if response.status_code == 200:
+                    logger.info("Detected EC2 instance metadata")
+                    return True
+            except:
+                pass
+            
+            return False
+            
+        except Exception:
+            return False
     
     def get_session(self) -> boto3.Session:
         """Get existing session or create new one"""

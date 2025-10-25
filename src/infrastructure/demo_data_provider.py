@@ -10,13 +10,90 @@ from ..core.models import (
     CostData, ServiceCost, ServiceType, EC2Instance, StorageVolume, 
     DatabaseInstance, InstanceState, UsageSummary, BudgetInfo, CostForecast
 )
+from config import Config
 
 
 class DemoDataProvider:
     """Provides realistic demo data for platform demonstration"""
     
     @staticmethod
-    def get_demo_usage_summary(budget: float = 15000) -> UsageSummary:
+    def get_empty_usage_summary() -> UsageSummary:
+        """Get empty usage summary for initial UI load"""
+        
+        # Empty budget info using Config values
+        budget_info = BudgetInfo(
+            total_budget=Config.BUDGET_WARNING_LIMIT,
+            current_spend=0.0,  # Start with 0
+            warning_limit=Config.BUDGET_WARNING_LIMIT,
+            maximum_limit=Config.BUDGET_MAXIMUM_LIMIT
+        )
+        
+        # Empty forecast
+        cost_forecast = CostForecast(
+            forecasted_amount=0.0,
+            confidence_level=0.0,
+            forecast_period_days=30,
+            base_amount=0.0,
+            trend_factor=1.0
+        )
+        
+        return UsageSummary(
+            budget_info=budget_info,
+            service_costs=[],  # Empty list
+            ec2_instances=[],  # Empty list
+            storage_volumes=[],  # Empty list
+            database_instances=[],  # Empty list
+            cost_forecast=cost_forecast,
+            recommendations=[],  # Empty list
+            last_updated=datetime.now()
+        )
+    
+    @staticmethod
+    def get_realistic_usage_summary() -> UsageSummary:
+        """Get realistic usage summary based on actual AWS costs (~$1.72)"""
+        
+        # Realistic service costs based on actual usage
+        service_costs = [
+            ServiceCost(
+                service_type=ServiceType.COST_EXPLORER,
+                cost=CostData(amount=1.70)  # Cost Explorer usage
+            ),
+            ServiceCost(
+                service_type=ServiceType.BEDROCK,
+                cost=CostData(amount=0.02)  # Claude 3 Haiku usage
+            )
+        ]
+        
+        # Realistic budget info using Config values
+        current_spend = 1.72
+        budget_info = BudgetInfo(
+            total_budget=Config.BUDGET_WARNING_LIMIT,  # Warning threshold
+            current_spend=current_spend,
+            warning_limit=Config.BUDGET_WARNING_LIMIT,  # Alert at $80
+            maximum_limit=Config.BUDGET_MAXIMUM_LIMIT  # Hard limit at $100
+        )
+        
+        # Realistic forecast (minimal growth)
+        cost_forecast = CostForecast(
+            forecasted_amount=2.15,
+            confidence_level=0.95,
+            forecast_period_days=30,
+            base_amount=current_spend,
+            trend_factor=1.25
+        )
+        
+        return UsageSummary(
+            budget_info=budget_info,
+            service_costs=service_costs,
+            ec2_instances=[],  # No EC2 instances
+            storage_volumes=[],  # No storage volumes
+            database_instances=[],  # No databases
+            cost_forecast=cost_forecast,
+            recommendations=[]
+        )
+    
+    @staticmethod
+    def get_demo_usage_summary() -> UsageSummary:
         """Get complete demo usage summary"""
         
         # Demo EC2 instances
@@ -110,11 +187,13 @@ class DemoDataProvider:
             )
         ]
         
-        # Demo budget info
-        current_spend = 12500.0
+        # Demo budget info using Config values
+        current_spend = 85.0  # Over warning limit to show alerts
         budget_info = BudgetInfo(
-            total_budget=budget,
-            current_spend=current_spend
+            total_budget=Config.BUDGET_WARNING_LIMIT,
+            current_spend=current_spend,
+            warning_limit=Config.BUDGET_WARNING_LIMIT,
+            maximum_limit=Config.BUDGET_MAXIMUM_LIMIT
         )
         
         # Demo forecast

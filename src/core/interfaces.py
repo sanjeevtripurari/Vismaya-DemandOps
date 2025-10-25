@@ -10,7 +10,9 @@ from datetime import datetime
 from .models import (
     UsageSummary, CostData, ServiceCost, EC2Instance, 
     StorageVolume, DatabaseInstance, CostForecast,
-    OptimizationRecommendation, ScenarioInput, ScenarioResult
+    OptimizationRecommendation, ScenarioInput, ScenarioResult,
+    ResourceSpecification, PricingData, CostEstimateResponse,
+    TimePeriod, BudgetImpactAnalysis, ForecastingContext
 )
 
 
@@ -156,4 +158,83 @@ class IAuthenticationService(ABC):
     @abstractmethod
     def is_authenticated(self) -> bool:
         """Check if currently authenticated"""
+        pass
+
+
+class IForecastingAIAssistant(ABC):
+    """Interface for forecasting AI assistant services"""
+    
+    @abstractmethod
+    async def process_cost_query(self, query: str, context: ForecastingContext) -> CostEstimateResponse:
+        """Process natural language cost estimation query"""
+        pass
+    
+    @abstractmethod
+    async def get_resource_pricing(self, resource_spec: ResourceSpecification) -> PricingData:
+        """Get current pricing for specific resource configuration"""
+        pass
+    
+    @abstractmethod
+    async def chat_response(self, message: str, context: ForecastingContext) -> str:
+        """Handle chat interactions with forecasting context"""
+        pass
+
+
+class IAWSPricingProvider(ABC):
+    """Interface for AWS Pricing API provider"""
+    
+    @abstractmethod
+    async def get_ec2_pricing(self, instance_type: str, region: str, os: str = "Linux") -> PricingData:
+        """Get EC2 instance pricing for all models (On-Demand, Reserved, Spot)"""
+        pass
+    
+    @abstractmethod
+    async def get_storage_pricing(self, storage_type: str, region: str) -> PricingData:
+        """Get EBS/S3 storage pricing"""
+        pass
+    
+    @abstractmethod
+    async def get_service_pricing(self, service: str, region: str, **kwargs) -> PricingData:
+        """Get pricing for other AWS services"""
+        pass
+    
+    @abstractmethod
+    async def clear_cache(self) -> None:
+        """Clear pricing data cache"""
+        pass
+
+
+class IQueryParser(ABC):
+    """Interface for natural language query parsing"""
+    
+    @abstractmethod
+    def parse_resource_query(self, query: str) -> ResourceSpecification:
+        """Parse natural language query into structured resource specification"""
+        pass
+    
+    @abstractmethod
+    def extract_time_period(self, query: str) -> TimePeriod:
+        """Extract time period from query (e.g., '2 months', '6 weeks')"""
+        pass
+    
+    @abstractmethod
+    def needs_clarification(self, resource_spec: ResourceSpecification) -> bool:
+        """Check if resource specification needs clarification"""
+        pass
+
+
+class ICostEstimationEngine(ABC):
+    """Interface for cost estimation engine"""
+    
+    @abstractmethod
+    async def estimate_resource_cost(self, resource_spec: ResourceSpecification, 
+                                   pricing_data: PricingData, 
+                                   duration: TimePeriod) -> CostEstimateResponse:
+        """Calculate total cost estimate for resource over specified duration"""
+        pass
+    
+    @abstractmethod
+    async def calculate_budget_impact(self, cost_estimate: float, 
+                                    current_budget: 'BudgetInfo') -> BudgetImpactAnalysis:
+        """Analyze impact of additional costs on current budget"""
         pass

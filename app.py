@@ -13,6 +13,7 @@ import os
 import logging
 import asyncio
 import socket
+from pathlib import Path
 from config import Config
 
 # Setup logging
@@ -198,25 +199,56 @@ def run_dashboard():
         print(f"❌ Error running dashboard: {e}")
 
 def check_virtual_environment():
-    """Check if virtual environment is activated"""
+    """Check if virtual environment is activated or available"""
+    # Check if we're running in Docker (skip venv check)
+    if os.path.exists('/.dockerenv') or os.environ.get('DOCKER_CONTAINER'):
+        print("🐳 Running in Docker container - virtual environment not required")
+        return True
+    
     in_venv = hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix)
     
-    if not in_venv:
-        print("⚠️  Virtual environment not detected!")
-        print("🔧 Please activate the virtual environment first:")
-        
-        if os.name == 'nt':  # Windows
-            print("   venv\\Scripts\\activate")
-        else:  # Unix/Linux/Mac
-            print("   source venv/bin/activate")
-        
-        print("\nOr use the startup script:")
-        print("   python vismaya-control.py start")
-        
-        return False
+    if in_venv:
+        print(f"✅ Virtual environment active: {sys.prefix}")
+        return True
     
-    print(f"✅ Virtual environment active: {sys.prefix}")
-    return True
+    # Check if we can use venv python directly
+    venv_python = None
+    if os.name == 'nt':  # Windows
+        venv_python = Path("venv/Scripts/python.exe")
+    else:  # Unix/Linux/Mac
+        venv_python = Path("venv/bin/python")
+    
+    if venv_python and venv_python.exists():
+        print("🔄 Virtual environment found but not activated")
+        print("🚀 Restarting in virtual environment...")
+        
+        # Restart the script in virtual environment
+        try:
+            subprocess.run([str(venv_python)] + sys.argv)
+            sys.exit(0)
+        except Exception as e:
+            print(f"❌ Error restarting in venv: {e}")
+    
+    print("⚠️  Virtual environment not found!")
+    print("🔧 Setting up virtual environment...")
+    
+    # Try to setup virtual environment
+    try:
+        if Path("venv-manager.py").exists():
+            subprocess.run([sys.executable, "venv-manager.py", "setup"])
+            print("🔄 Please run the application again")
+            sys.exit(0)
+        else:
+            subprocess.run([sys.executable, "setup-venv.py"])
+            print("🔄 Please activate the virtual environment and run again:")
+            if os.name == 'nt':  # Windows
+                print("   venv\\Scripts\\activate")
+            else:  # Unix/Linux/Mac
+                print("   source venv/bin/activate")
+    except Exception as e:
+        print(f"❌ Error setting up virtual environment: {e}")
+    
+    return False
 
 def ensure_dependencies():
     """Ensure all dependencies are installed in the virtual environment"""

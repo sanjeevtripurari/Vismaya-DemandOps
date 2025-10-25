@@ -34,9 +34,12 @@ class CostAnalysisService:
             
             # Create basic usage summary for analysis
             from ..core.models import BudgetInfo
+            from config import Config
             budget_info = BudgetInfo(
-                total_budget=15000,  # Default budget
-                current_spend=current_costs.amount
+                total_budget=Config.BUDGET_WARNING_LIMIT,  # Warning threshold
+                current_spend=current_costs.amount,
+                warning_limit=Config.BUDGET_WARNING_LIMIT,
+                maximum_limit=Config.BUDGET_MAXIMUM_LIMIT
             )
             
             usage_summary = UsageSummary(

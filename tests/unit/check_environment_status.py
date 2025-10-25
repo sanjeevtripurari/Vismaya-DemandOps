@@ -65,8 +65,14 @@ def check_aws_connectivity():
         # Basic AWS identity check
         sts = boto3.client('sts', region_name=Config.AWS_REGION)
         identity = sts.get_caller_identity()
+        
+        # Get user display name - prefer email if available
+        user_display = getattr(Config, 'AWS_USER_EMAIL', None)
+        if not user_display:
+            user_display = identity['Arn'].split('/')[-1]
+        
         print(f"   ✅ AWS Account: {identity['Account']}")
-        print(f"   ✅ User/Role: {identity['Arn'].split('/')[-1]}")
+        print(f"   ✅ User: {user_display}")
         print(f"   ✅ Region: {Config.AWS_REGION}")
         
         aws_services_status = True
@@ -103,9 +109,17 @@ def check_aws_connectivity():
         # Test Bedrock
         try:
             bedrock = boto3.client('bedrock-runtime', region_name=Config.AWS_REGION)
+            # Try a simple operation to test access
+            bedrock_models = boto3.client('bedrock', region_name=Config.AWS_REGION)
+            bedrock_models.list_foundation_models()
             print("   ✅ Bedrock: Accessible")
         except Exception as e:
-            print(f"   ❌ Bedrock: {str(e)[:50]}...")
+            error_str = str(e)
+            if 'AccessDenied' in error_str or 'not authorized' in error_str:
+                user_email = getattr(Config, 'AWS_USER_EMAIL', 'user')
+                print(f"   ❌ Bedrock: Access denied for {user_email}")
+            else:
+                print(f"   ❌ Bedrock: {str(e)[:50]}...")
             aws_services_status = False
         
         return aws_services_status

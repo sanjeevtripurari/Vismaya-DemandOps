@@ -175,3 +175,18 @@ container._services['cost_provider'] = MockCostProvider()
 ```
 
 This architecture ensures the codebase is maintainable, testable, and ready for future enhancements while following industry best practices.
+
+---
+
+This comprehensive deployment guide ensures your Vismaya DemandOps application runs securely and efficiently in production environments.
+
+## Team
+
+**Team MaximAI** - Passionate about AI-driven solutions for cloud cost optimization
+
+### Our Mission
+To democratize cloud cost optimization through intelligent AI-powered solutions that make FinOps accessible to organizations of all sizes.
+
+## License
+
+MIT License - Built for AWS SuperHack 2025 by **Team MaximAI**

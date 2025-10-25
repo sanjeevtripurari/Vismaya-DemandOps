@@ -2,7 +2,7 @@
 .env
 .env.local
 .env.production
-
+.kiro/
 # Python
 __pycache__/
 *.py[cod]
@@ -49,20 +49,47 @@ venv.bak/
 ehthumbs.db
 Thumbs.db
 
-# Logs
+# Logs (comprehensive)
 *.log
+*.log.*
 logs/
+log/
+shutdown*.log
+*shutdown*.log
+deployment*.log
+*deployment*.log
+error*.log
+debug*.log
+access*.log
+application*.log
 
 # Streamlit
 .streamlit/
 
 # AWS credentials (keep local only)
+.aws/
 .aws/credentials
 .aws/config
+docker/.aws/
+docker/.aws/credentials
+docker/.aws/config
 
 # Docker
 .dockerignore
+docker/docker-compose.override.yml
 
 # Temporary files
 *.tmp
 *.temp
+
+# SSH keys and certificates
+*.pem
+*.key
+*.crt
+*.p12
+
+# Shutdown and deployment logs
+shutdown_log*
+*shutdown_log*
+deployment_log*
+*deployment_log*
