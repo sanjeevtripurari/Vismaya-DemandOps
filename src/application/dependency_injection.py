@@ -9,15 +9,21 @@ from typing import Dict, Any
 
 from ..core.interfaces import (
     ICostDataProvider, IResourceProvider, IForecastingService, 
-    IAIAssistant, IAuthenticationService
+    IAIAssistant, IAuthenticationService, IForecastingAIAssistant,
+    IAWSPricingProvider, IQueryParser, ICostEstimationEngine
 )
 from ..infrastructure.aws_cost_provider import AWSCostProvider
 from ..infrastructure.aws_resource_provider import AWSResourceProvider
 from ..infrastructure.bedrock_ai_assistant import BedrockAIAssistant
 from ..infrastructure.aws_session_factory import AWSSessionFactory, AWSAuthenticationService
 from ..infrastructure.sqlite_repository import SQLiteRepository
+from ..infrastructure.aws_pricing_provider import AWSPricingProvider
+from ..infrastructure.forecasting_bedrock_assistant import ForecastingBedrockAssistant
 from ..services.cost_service import CostAnalysisService
 from ..services.resource_service import ResourceManagementService
+from ..services.query_parser import NaturalLanguageQueryParser
+from ..services.cost_estimation_engine import CostEstimationEngine
+from ..services.forecasting_ai_assistant import ForecastingAIAssistant
 from .use_cases import (
     GetUsageSummaryUseCase, AnalyzeScenarioUseCase, 
     GetCostInsightsUseCase, HandleChatUseCase, GetResourceDetailsUseCase
@@ -123,6 +129,23 @@ class DependencyContainer:
                 self._config.BEDROCK_MODEL_ID
             )
             
+            # Forecasting AI components
+            self._services['pricing_provider'] = AWSPricingProvider(aws_session, self._config)
+            self._services['query_parser'] = NaturalLanguageQueryParser()
+            self._services['cost_estimation_engine'] = CostEstimationEngine()
+            self._services['forecasting_bedrock_assistant'] = ForecastingBedrockAssistant(
+                aws_session,
+                self._config.BEDROCK_MODEL_ID
+            )
+            
+            # Forecasting AI Assistant
+            self._services['forecasting_ai_assistant'] = ForecastingAIAssistant(
+                self._services['pricing_provider'],
+                self._services['query_parser'],
+                self._services['cost_estimation_engine'],
+                self._services['ai_assistant']
+            )
+            
             # Application services
             self._services['cost_service'] = CostAnalysisService(
                 self._services['cost_provider'],
@@ -201,6 +224,20 @@ class DependencyContainer:
             # Check AI assistant
             ai_assistant = self.get('ai_assistant')
             health_status['ai_assistant'] = ai_assistant._bedrock_client is not None
+            
+            # Check forecasting AI assistant
+            try:
+                forecasting_ai = self.get('forecasting_ai_assistant')
+                health_status['forecasting_ai'] = forecasting_ai is not None
+            except Exception:
+                health_status['forecasting_ai'] = False
+            
+            # Check pricing provider
+            try:
+                pricing_provider = self.get('pricing_provider')
+                health_status['pricing_provider'] = pricing_provider._pricing_client is not None
+            except Exception:
+                health_status['pricing_provider'] = False
             
         except Exception as e:
             logger.error(f"Health check error: {e}")

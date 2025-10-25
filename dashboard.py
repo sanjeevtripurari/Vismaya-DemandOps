@@ -1053,6 +1053,242 @@ Recommendations:
             # Display default analysis without white block
             st.markdown(f"**🤖 Vismaya:** {analysis}")
     
+    def render_forecasting_ai_assistant(self, metrics):
+        """Render Forecasting AI assistant section for cost estimation queries"""
+        
+        # Initialize forecasting chat history
+        if 'forecasting_chat_history' not in st.session_state:
+            st.session_state.forecasting_chat_history = []
+        
+        # Show data context indicator
+        try:
+            usage_summary_use_case = self.container.get_use_case('get_usage_summary')
+            usage_summary = asyncio.run(usage_summary_use_case.execute())
+            
+            # Data freshness indicator
+            if usage_summary.last_updated:
+                time_diff = datetime.now() - usage_summary.last_updated
+                if time_diff.total_seconds() < 300:  # Less than 5 minutes
+                    st.success("🟢 Real-time AWS pricing data available")
+                else:
+                    st.warning("🟡 Using cached data (refresh for latest pricing)")
+            
+        except Exception:
+            st.info("🔵 Using available data for cost estimation")
+        
+        # Forecasting AI Chat Input Section
+        st.markdown("### 💰 Ask About AWS Resource Costs")
+        
+        # Example queries for user guidance
+        with st.expander("💡 Example Queries", expanded=False):
+            st.markdown("""
+            **Try asking:**
+            • "What would 2 t3.medium EC2 instances cost for 3 months?"
+            • "Cost of a db.t3.micro RDS MySQL instance for 6 months"
+            • "How much for 500 GB of EBS GP3 storage for 1 year?"
+            • "Price of m5.large instance in us-west-2 for 2 months"
+            • "Cost comparison: t3.small vs t3.medium for 90 days"
+            """)
+        
+        # Chat input form with horizontal buttons
+        with st.form("forecasting_chat_form", clear_on_submit=True):
+            user_input = st.text_input(
+                "", 
+                placeholder="Ask about AWS resource costs, pricing comparisons, or budget impact...",
+                key="forecasting_chat_input_form"
+            )
+            
+            # Horizontal button layout
+            col1, col2, col3, col4 = st.columns([2, 1.5, 1.5, 1])
+            with col1:
+                submitted = st.form_submit_button("💰 Get Cost Estimate", type="primary", use_container_width=True)
+            with col2:
+                clear_chat = st.form_submit_button("🗑️ Clear", use_container_width=True)
+            with col3:
+                help_button = st.form_submit_button("❓ Help", use_container_width=True)
+            with col4:
+                refresh_pricing = st.form_submit_button("🔄 Refresh", use_container_width=True)
+            
+        # Handle form submissions
+        if submitted and user_input and user_input.strip():
+            # Add user message immediately to show responsiveness
+            st.session_state.forecasting_chat_history.append({
+                'user': user_input,
+                'assistant': "🤖 Fetching real-time AWS pricing data...",
+                'timestamp': datetime.now(),
+                'processing': True
+            })
+            
+            # Store the question for background processing
+            st.session_state.pending_forecasting_question = user_input
+            st.rerun()
+        
+        elif clear_chat:
+            st.session_state.forecasting_chat_history = []
+            st.rerun()
+        
+        elif help_button:
+            # Add help response to chat
+            help_response = """🤖 **Forecasting AI Assistant Help**
+
+I can help you estimate AWS resource costs accurately using real pricing data.
+
+**Supported Resources:**
+• EC2 instances (all types)
+• RDS databases (MySQL, PostgreSQL, etc.)
+• EBS storage (GP2, GP3, IO1, IO2)
+• S3 storage
+• Lambda functions
+
+**Example Queries:**
+• "What would 2 t3.medium instances cost for 3 months?"
+• "Price of 100 GB EBS storage for 6 months"
+• "Cost comparison: m5.large vs c5.large"
+
+**Tips:**
+• Specify instance types (e.g., t3.micro, m5.large)
+• Include time periods (e.g., 2 months, 90 days)
+• Mention regions for accurate pricing
+• Ask about budget impact to see spending effects
+
+Just ask me about any AWS resource cost!"""
+            
+            st.session_state.forecasting_chat_history.append({
+                'user': 'Help',
+                'assistant': help_response,
+                'timestamp': datetime.now(),
+                'processing': False
+            })
+            st.rerun()
+        
+        elif refresh_pricing:
+            # Clear any pricing cache and refresh
+            st.session_state.pricing_cache_cleared = True
+            st.success("🔄 Pricing cache cleared - next query will fetch fresh data")
+            st.rerun()
+        
+        # Process pending forecasting question in background
+        if 'pending_forecasting_question' in st.session_state:
+            question = st.session_state.pending_forecasting_question
+            del st.session_state.pending_forecasting_question
+            
+            try:
+                # Process the forecasting question with the new AI assistant
+                forecasting_ai = self.container.get('forecasting_ai_assistant')
+                
+                # Create forecasting context
+                from src.core.models import ForecastingContext
+                context = ForecastingContext()
+                
+                # Add current usage and budget info if available
+                if hasattr(st.session_state, 'usage_summary') and st.session_state.usage_summary:
+                    context.current_usage = st.session_state.usage_summary
+                    context.budget_info = st.session_state.usage_summary.budget_info
+                    context.cost_forecast = st.session_state.usage_summary.cost_forecast
+                
+                # Get response from forecasting AI
+                response = asyncio.run(forecasting_ai.chat_response(question, context))
+                
+                # Update the last message with the response
+                if st.session_state.forecasting_chat_history and st.session_state.forecasting_chat_history[-1].get('processing'):
+                    st.session_state.forecasting_chat_history[-1]['assistant'] = response
+                    st.session_state.forecasting_chat_history[-1]['processing'] = False
+                
+            except Exception as e:
+                response = f"I'm having trouble processing your cost estimation request. Error: {str(e)[:100]}... Please try again."
+                
+                # Update the last message with error
+                if st.session_state.forecasting_chat_history and st.session_state.forecasting_chat_history[-1].get('processing'):
+                    st.session_state.forecasting_chat_history[-1]['assistant'] = response
+                    st.session_state.forecasting_chat_history[-1]['processing'] = False
+            
+            st.rerun()
+        
+        # Forecasting Agent Response section
+        st.markdown("---")
+        st.markdown("### 🤖 Cost Estimation Response")
+        
+        # Determine what to show in Agent Response
+        if st.session_state.forecasting_chat_history:
+            # Show chat history when user has asked questions
+            with st.container():
+                st.markdown("""
+                <div style="background-color: #ffffff; border: 2px solid #e0e0e0; border-radius: 10px; padding: 20px; max-height: 400px; overflow-y: auto; margin: 10px 0;">
+                """, unsafe_allow_html=True)
+                
+                # Show all chat exchanges with clean formatting
+                for i, chat in enumerate(st.session_state.forecasting_chat_history):
+                    st.markdown(f"**💬 You:** {chat['user']}")
+                    
+                    # Show processing indicator or response
+                    if chat.get('processing', False):
+                        st.markdown("**🤖 Vismaya:** 🔄 Fetching real-time AWS pricing...")
+                    else:
+                        st.markdown(f"**🤖 Vismaya:** {chat['assistant']}")
+                    
+                    # Add separator between conversations
+                    if i < len(st.session_state.forecasting_chat_history) - 1:
+                        st.markdown("---")
+                
+                st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            # Show default forecasting introduction when no questions asked
+            try:
+                # Get current budget context
+                budget_info = st.session_state.usage_summary.budget_info if hasattr(st.session_state, 'usage_summary') else None
+                
+                if budget_info:
+                    intro_analysis = f"""Welcome to the Forecasting AI Assistant! 🤖
+
+**Your Current Budget Context:**
+• Current spend: ${budget_info.current_spend:.2f}
+• Budget limit: ${budget_info.warning_limit:.2f}
+• Remaining budget: ${budget_info.remaining_budget:.2f}
+• Budget utilization: {budget_info.utilization_percentage:.1f}%
+
+**I can help you with:**
+💰 **Accurate Cost Estimates** - Real AWS pricing data, no guesswork
+📊 **Budget Impact Analysis** - See how new resources affect your budget
+🔍 **Price Comparisons** - Compare different instance types and pricing models
+⏱️ **Duration Planning** - Costs for different time periods
+
+**Just ask me about any AWS resource!**
+Example: "What would a t3.medium instance cost for 2 months?"
+
+*All pricing data comes directly from AWS APIs for accuracy.*"""
+                else:
+                    intro_analysis = """Welcome to the Forecasting AI Assistant! 🤖
+
+I can help you estimate AWS resource costs accurately using real-time pricing data.
+
+**Ask me about:**
+• EC2 instance costs (any type, any duration)
+• RDS database pricing
+• EBS storage costs
+• S3 storage pricing
+• Lambda function costs
+
+**Example queries:**
+• "Cost of 2 t3.medium instances for 3 months"
+• "Price comparison: m5.large vs c5.large"
+• "How much for 500 GB EBS storage?"
+
+*All estimates use official AWS pricing - no hallucination!*"""
+                
+            except Exception:
+                intro_analysis = """Welcome to the Forecasting AI Assistant! 🤖
+
+I provide accurate AWS cost estimates using real-time pricing data.
+
+Ask me about any AWS resource costs and I'll give you precise estimates with budget impact analysis.
+
+Try: "What would a t3.medium instance cost for 2 months?"
+
+*Powered by official AWS Pricing API*"""
+            
+            # Display default analysis
+            st.markdown(f"**🤖 Vismaya:** {intro_analysis}")
+    
     def render_current_usage_tab(self):
         """Render the Current Usage tab content"""
         # Get real metrics
@@ -1551,6 +1787,9 @@ Recommendations:
         """Render the Enhanced Forecast tab with organic growth projections and timeline"""
         st.subheader("📈 Cost Forecasting & Budget Timeline")
         
+        # Get real metrics for context
+        metrics = self.calculate_metrics()
+        
         try:
             if not hasattr(st.session_state, 'usage_summary') or st.session_state.usage_summary is None:
                 st.warning("Loading forecast data...")
@@ -1823,6 +2062,11 @@ Recommendations:
             )
             
             st.plotly_chart(fig, use_container_width=True)
+            
+            # Add AI Assistant section for forecasting
+            st.markdown("---")
+            st.markdown("### 🤖 Forecasting AI Assistant")
+            self.render_forecasting_ai_assistant(metrics)
             
         except Exception as e:
             st.error(f"Error loading forecast data: {e}")
