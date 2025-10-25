@@ -114,6 +114,14 @@ class ForecastingAIAssistant(IForecastingAIAssistant):
                 complete_spec.get('applied_defaults', [])
             )
             
+            # Add multi-resource notes if available
+            if complete_spec.get('storage_note'):
+                cost_estimate.storage_note = complete_spec['storage_note']
+            if complete_spec.get('database_note'):
+                cost_estimate.database_note = complete_spec['database_note']
+            if complete_spec.get('multi_resource_notes'):
+                cost_estimate.multi_resource_notes = complete_spec['multi_resource_notes']
+            
             # Add budget impact analysis if context is available
             if context and context.budget_info and cost_estimate.is_successful:
                 budget_impact = await self._cost_engine.calculate_budget_impact(
@@ -342,6 +350,16 @@ class ForecastingAIAssistant(IForecastingAIAssistant):
         # Smart defaults explanation
         if cost_estimate.defaults_applied and len(cost_estimate.defaults_applied) > 0:
             response_parts.append(f"\n{cost_estimate.default_explanation}")
+        
+        # Multi-resource notes
+        if hasattr(cost_estimate, 'storage_note') and cost_estimate.storage_note:
+            response_parts.append(f"\n💾 **Storage:** {cost_estimate.storage_note}")
+        
+        if hasattr(cost_estimate, 'database_note') and cost_estimate.database_note:
+            response_parts.append(f"\n🗄️ **Database:** {cost_estimate.database_note}")
+        
+        if hasattr(cost_estimate, 'multi_resource_notes') and cost_estimate.multi_resource_notes:
+            response_parts.append(f"\n📝 **Note:** {cost_estimate.multi_resource_notes}")
         
         # Refinement suggestions
         if cost_estimate.refinement_suggestions:

@@ -90,8 +90,14 @@ class CostEstimationEngine(ICostEstimationEngine):
                 for cost_type, cost_amount in additional_costs.items():
                     pricing_breakdown[f"Additional: {cost_type}"] = cost_amount
             
-            # Calculate total cost (use cheapest option as primary)
-            total_cost = min(pricing_breakdown.values()) if pricing_breakdown else 0.0
+            # Calculate total cost (use on-demand as primary, fallback to first available)
+            if 'On-Demand' in pricing_breakdown:
+                total_cost = pricing_breakdown['On-Demand']
+            elif pricing_breakdown:
+                # Use the first non-zero cost if on-demand is not available
+                total_cost = next((cost for cost in pricing_breakdown.values() if cost > 0), 0.0)
+            else:
+                total_cost = 0.0
             
             # Generate recommendations
             recommendations = self._generate_cost_recommendations(

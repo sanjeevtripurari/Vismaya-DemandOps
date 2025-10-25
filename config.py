@@ -21,7 +21,10 @@ class Config:
     AWS_SESSION_TOKEN = os.getenv('AWS_SESSION_TOKEN')
     
     # Bedrock Configuration
-    BEDROCK_MODEL_ID = os.getenv('BEDROCK_MODEL_ID', 'us.anthropic.claude-3-haiku-20240307-v1:0')
+    BEDROCK_MODEL_ID = os.getenv('BEDROCK_MODEL_ID', 'anthropic.claude-3-sonnet-20240229-v1:0')
+    BEDROCK_FALLBACK_MODEL_ID = os.getenv('BEDROCK_FALLBACK_MODEL_ID', 'anthropic.claude-3-haiku-20240307-v1:0')
+    BEDROCK_MAX_TOKENS = int(os.getenv('BEDROCK_MAX_TOKENS', 1000))
+    BEDROCK_TEMPERATURE = float(os.getenv('BEDROCK_TEMPERATURE', 0.1))
     
     # Application Configuration
     DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'

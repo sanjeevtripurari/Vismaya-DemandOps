@@ -54,7 +54,7 @@ class SmartDefaultsProcessor:
         
         # Common patterns for extracting information from queries
         self.patterns = {
-            'quantity': r'(\d+)\s*(?:x\s*)?(?:instances?|servers?|databases?|volumes?)',
+            'quantity': r'(\d+)\s*(?:x\s*)?(?:\w+\.\w+\s+)?(?:instances?|servers?|databases?|volumes?|ec2|rds)',
             'instance_type': r'(t3\.\w+|m5\.\w+|c5\.\w+|r5\.\w+|db\.t3\.\w+|db\.m5\.\w+)',
             'storage_size': r'(\d+)\s*(?:gb|tb|gib|tib)',
             'duration': r'(?:for\s+)?(\d+)\s*(?:months?|month|mo|years?|year|yr|days?|day)',
@@ -62,15 +62,33 @@ class SmartDefaultsProcessor:
         }
     
     def apply_defaults(self, query: str, parsed_query: Optional[Dict] = None) -> Dict[str, Any]:
-        """Apply smart defaults to incomplete query"""
+        """Apply smart defaults to incomplete query - handle multiple resources"""
         
-        # Determine resource type from query
-        resource_type = self._detect_resource_type(query)
+        # Check for multiple resource types in the query
+        query_lower = query.lower()
         
-        # Start with base defaults for the resource type
-        result = self.default_specs.get(resource_type, self.default_specs['ec2']).copy()
-        result['resource_type'] = resource_type
-        result['applied_defaults'] = []
+        # Detect all resource types mentioned
+        detected_resources = self._detect_all_resource_types(query)
+        
+        # For complex queries with multiple resources, prioritize the first mentioned
+        if len(detected_resources) > 1:
+            # Multi-resource query - process primary resource and add notes about others
+            primary_resource = detected_resources[0]  # First detected resource
+            result = self.default_specs.get(primary_resource, self.default_specs['ec2']).copy()
+            result['resource_type'] = primary_resource
+            result['applied_defaults'] = []
+            
+            # Add multi-resource handling
+            result['is_multi_resource'] = True
+            result['detected_resources'] = detected_resources
+            result['multi_resource_notes'] = self._generate_multi_resource_notes(query, detected_resources)
+            
+        else:
+            # Single resource query - original logic
+            resource_type = self._detect_resource_type(query)
+            result = self.default_specs.get(resource_type, self.default_specs['ec2']).copy()
+            result['resource_type'] = resource_type
+            result['applied_defaults'] = []
         
         # Extract any explicit specifications from the query
         extracted = self._extract_specifications(query)
@@ -90,7 +108,11 @@ class SmartDefaultsProcessor:
                     ))
         
         # Add defaults for any missing critical fields
-        self._ensure_critical_fields(result, resource_type)
+        self._ensure_critical_fields(result, result['resource_type'])
+        
+        # Add storage and database cost notes for multi-resource queries
+        if result.get('is_multi_resource'):
+            self._add_multi_resource_cost_notes(result, query)
         
         return result
     
@@ -269,3 +291,82 @@ class SmartDefaultsProcessor:
             suggestions.append("Specify engine: 'MySQL', 'PostgreSQL', 'MariaDB'")
         
         return suggestions[:3]  # Limit to top 3 suggestions
+    
+    def _detect_all_resource_types(self, query: str) -> List[str]:
+        """Detect all resource types mentioned in the query"""
+        query_lower = query.lower()
+        detected = []
+        
+        # Check for EC2/compute resources
+        if any(term in query_lower for term in ['ec2', 'instance', 'server', 'compute', 'vm']):
+            detected.append('ec2')
+        
+        # Check for RDS/database resources
+        if any(term in query_lower for term in ['rds', 'database', 'db', 'mysql', 'postgres', 'postgresql']):
+            detected.append('rds')
+        
+        # Check for storage resources
+        if any(term in query_lower for term in ['storage', 'ebs', 'volume', 'disk', 'gb', 'tb']):
+            # Only add storage if it's not already covered by EC2 (EC2 includes EBS)
+            if 'ec2' not in detected:
+                detected.append('ebs')
+        
+        # Check for S3 resources
+        if any(term in query_lower for term in ['s3', 'bucket', 'object storage']):
+            detected.append('s3')
+        
+        # Check for Lambda resources
+        if any(term in query_lower for term in ['lambda', 'function', 'serverless']):
+            detected.append('lambda')
+        
+        # If no resources detected, default to EC2
+        if not detected:
+            detected.append('ec2')
+        
+        return detected
+    
+    def _generate_multi_resource_notes(self, query: str, detected_resources: List[str]) -> str:
+        """Generate notes about multi-resource queries"""
+        query_lower = query.lower()
+        notes = []
+        
+        # Check for storage mentioned with EC2
+        if 'ec2' in detected_resources and any(term in query_lower for term in ['gb', 'tb', 'storage']):
+            storage_match = re.search(r'(\d+)\s*gb', query_lower)
+            if storage_match:
+                storage_size = storage_match.group(1)
+                notes.append(f"Additional EBS storage: ~${int(storage_size) * 0.08:.2f}/month for {storage_size}GB GP3 storage")
+        
+        # Check for PostgreSQL/RDS mentioned
+        if 'rds' in detected_resources:
+            postgres_match = re.search(r'(\d+)\s*postgres', query_lower)
+            if postgres_match:
+                postgres_count = postgres_match.group(1)
+                notes.append(f"PostgreSQL databases: Ask separately for '{postgres_count} PostgreSQL databases' to get RDS costs")
+            else:
+                notes.append("PostgreSQL databases: Ask separately for 'PostgreSQL database costs' to get RDS pricing")
+        
+        return " | ".join(notes) if notes else ""
+    
+    def _add_multi_resource_cost_notes(self, result: Dict[str, Any], query: str):
+        """Add cost breakdown notes for multi-resource queries"""
+        query_lower = query.lower()
+        
+        # Add storage cost note if storage is mentioned with EC2
+        if result['resource_type'] == 'ec2':
+            storage_match = re.search(r'(\d+)\s*gb', query_lower)
+            if storage_match:
+                storage_size = int(storage_match.group(1))
+                quantity = result.get('quantity', 1)
+                total_storage = storage_size * quantity
+                storage_cost = total_storage * 0.08  # GP3 pricing per GB/month
+                result['storage_note'] = f"Additional storage cost: ~${storage_cost:.2f}/month for {total_storage}GB GP3 EBS storage ({quantity}x {storage_size}GB)"
+        
+        # Add database note if PostgreSQL is mentioned
+        if any(term in query_lower for term in ['postgres', 'postgresql']):
+            postgres_match = re.search(r'(\d+)\s*postgres', query_lower)
+            if postgres_match:
+                postgres_count = postgres_match.group(1)
+                result['database_note'] = f"PostgreSQL costs not included. For {postgres_count} PostgreSQL databases, ask: 'cost of {postgres_count} PostgreSQL databases'"
+            else:
+                result['database_note'] = "PostgreSQL costs not included. Ask separately: 'cost of PostgreSQL database'"
