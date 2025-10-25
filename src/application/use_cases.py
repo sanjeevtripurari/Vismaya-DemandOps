@@ -35,6 +35,19 @@ class GetUsageSummaryUseCase:
             current_costs = await self._cost_service._cost_provider.get_current_costs()
             service_costs = await self._cost_service._cost_provider.get_service_costs()
             
+            # Validate cost consistency and use service costs total if available
+            service_costs_total = sum(sc.cost.amount for sc in service_costs)
+            
+            # Use the more accurate value (service costs total is usually more detailed)
+            if service_costs_total > 0 and abs(service_costs_total - current_costs.amount) > 0.01:
+                logger.warning(f"Cost mismatch detected: Total=${current_costs.amount:.2f}, Services=${service_costs_total:.2f}")
+                # Use service costs total as it's more detailed
+                actual_current_spend = service_costs_total
+            else:
+                actual_current_spend = current_costs.amount
+            
+            logger.info(f"Using current spend: ${actual_current_spend:.2f} (Total: ${current_costs.amount:.2f}, Services: ${service_costs_total:.2f})")
+            
             # Get resource inventory
             inventory = await self._resource_service.get_resource_inventory()
             
@@ -42,16 +55,16 @@ class GetUsageSummaryUseCase:
             forecast = await self._cost_service.get_cost_forecast()
             if not forecast:
                 forecast = CostForecast(
-                    forecasted_amount=current_costs.amount * 1.1,
+                    forecasted_amount=actual_current_spend * 1.1,
                     confidence_level=0.7,
                     forecast_period_days=30,
-                    base_amount=current_costs.amount
+                    base_amount=actual_current_spend
                 )
             
-            # Create budget info with warning and maximum limits
+            # Create budget info with warning and maximum limits using consistent spend
             budget_info = BudgetInfo(
                 total_budget=self._config.BUDGET_WARNING_LIMIT,
-                current_spend=current_costs.amount,
+                current_spend=actual_current_spend,
                 warning_limit=self._config.BUDGET_WARNING_LIMIT,
                 maximum_limit=self._config.BUDGET_MAXIMUM_LIMIT
             )

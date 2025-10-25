@@ -4,6 +4,7 @@ import plotly.express as px
 import pandas as pd
 import asyncio
 import os
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -591,6 +592,9 @@ aws_secret_access_key = {secret_key}"""
 
 class VismayaDashboard:
     def __init__(self):
+        # Initialize logger
+        self.logger = logging.getLogger(__name__)
+        
         # Check credentials first
         if not CredentialsSetupUI.check_credentials():
             self.credentials_needed = True
@@ -608,57 +612,150 @@ class VismayaDashboard:
         self.repository = SQLiteRepository()
         
     def load_data(self):
-        """Load AWS cost and usage data from SQLite first, no loading screens"""
+        """Load data from SQLite cache - only fetch from Cost Explorer on startup or manual refresh"""
         
         if 'data_loaded' not in st.session_state:
-            # Always load from SQLite first for instant UI
+            # Always try to load from SQLite first - never auto-fetch from Cost Explorer
+            cached_data_loaded = False
+            
             try:
-                # Try to get today's cached data
                 today = datetime.now()
                 cached_summary = asyncio.run(self.repository.get_usage_summary(today))
                 
                 if cached_summary:
-                    # Use cached data immediately
+                    # Use cached data regardless of age - user can manually refresh if needed
                     st.session_state.usage_summary = cached_summary
                     st.session_state.data_loaded = True
                     st.session_state.last_refresh = cached_summary.last_updated
-                else:
-                    # Try to get any recent cached data (within last 7 days)
-                    historical_summaries = asyncio.run(self.repository.get_historical_summaries(7))
+                    cached_data_loaded = True
+                    
+                    # Show data age to user
+                    time_diff = datetime.now() - cached_summary.last_updated
+                    hours_old = time_diff.total_seconds() / 3600
+                    
+                    if hours_old < 1:
+                        self.logger.info(f"Using recent cached data from {cached_summary.last_updated}")
+                    else:
+                        self.logger.info(f"Using cached data from {cached_summary.last_updated} ({hours_old:.1f} hours old)")
+                
+                if not cached_data_loaded:
+                    # Try to get any historical cached data
+                    historical_summaries = asyncio.run(self.repository.get_historical_summaries(30))
                     if historical_summaries:
                         latest_summary = historical_summaries[0]
                         st.session_state.usage_summary = latest_summary
                         st.session_state.data_loaded = True
                         st.session_state.last_refresh = latest_summary.last_updated
-                    else:
-                        # Load default empty data as last resort
+                        cached_data_loaded = True
+                        self.logger.info("Using historical cached data for display")
+                        
+            except Exception as e:
+                self.logger.warning(f"Could not load cached data: {e}")
+            
+            # Only fetch fresh data on first startup if no cached data exists
+            if not cached_data_loaded and not st.session_state.get('initial_load_attempted', False):
+                try:
+                    self.logger.info("No cached data found - fetching initial data from AWS Cost Explorer...")
+                    st.session_state.initial_load_attempted = True
+                    
+                    # Get fresh data from Cost Explorer for initial load
+                    usage_summary_use_case = self.container.get_use_case('get_usage_summary')
+                    fresh_summary = asyncio.run(usage_summary_use_case.execute())
+                    
+                    # Save to database
+                    asyncio.run(self.repository.save_usage_summary(fresh_summary))
+                    
+                    # Update session state with fresh data
+                    st.session_state.usage_summary = fresh_summary
+                    st.session_state.data_loaded = True
+                    st.session_state.last_refresh = datetime.now()
+                    
+                    self.logger.info(f"Initial data loaded: ${fresh_summary.budget_info.current_spend:.2f}")
+                    
+                except Exception as e:
+                    self.logger.error(f"Failed to fetch initial data: {e}")
+                    
+                    # Fall back to default empty data
+                    try:
                         default_summary = asyncio.run(self.repository.get_default_usage_summary())
                         st.session_state.usage_summary = default_summary
                         st.session_state.data_loaded = True
                         st.session_state.last_refresh = datetime.now()
-                        
-            except Exception as e:
-                logger.warning(f"Could not load any data: {e}")
-                # Load default empty data as fallback
+                        self.logger.info("Using default empty data as fallback")
+                    except Exception as fallback_error:
+                        self.logger.error(f"Could not load default data: {fallback_error}")
+                        st.session_state.data_loaded = False
+            
+            elif not cached_data_loaded:
+                # No cached data and initial load already attempted - use defaults
                 try:
                     default_summary = asyncio.run(self.repository.get_default_usage_summary())
                     st.session_state.usage_summary = default_summary
                     st.session_state.data_loaded = True
                     st.session_state.last_refresh = datetime.now()
+                    self.logger.info("Using default empty data - no cached data available")
                 except Exception as fallback_error:
-                    logger.error(f"Could not load default data: {fallback_error}")
+                    self.logger.error(f"Could not load default data: {fallback_error}")
                     st.session_state.data_loaded = False
     
+    def validate_cost_data_consistency(self):
+        """Validate that all cost displays show consistent Cost Explorer data"""
+        if 'usage_summary' not in st.session_state:
+            return True
+        
+        usage_summary = st.session_state.usage_summary
+        
+        # Validate service costs sum to total
+        service_total = sum(sc.cost.amount for sc in usage_summary.service_costs)
+        current_spend = usage_summary.budget_info.current_spend
+        
+        # Allow for small rounding differences - log but don't show user warnings
+        if abs(service_total - current_spend) > 0.01:
+            self.logger.debug(f"Cost data difference: Service total ${service_total:.2f}, Current spend ${current_spend:.2f}, Difference ${abs(service_total - current_spend):.2f}")
+        
+        return True
+    
+    def force_refresh_cost_data(self):
+        """Force refresh cost data from Cost Explorer API - user-initiated only"""
+        try:
+            if self.container:
+                self.logger.info("User requested manual refresh from Cost Explorer API")
+                
+                # Get fresh data from Cost Explorer
+                usage_summary_use_case = self.container.get_use_case('get_usage_summary')
+                fresh_summary = asyncio.run(usage_summary_use_case.execute())
+                
+                # Save to database
+                asyncio.run(self.repository.save_usage_summary(fresh_summary))
+                
+                # Update session state with fresh data
+                st.session_state.usage_summary = fresh_summary
+                st.session_state.data_loaded = True
+                st.session_state.last_refresh = datetime.now()
+                
+                self.logger.info(f"Manual refresh completed: ${fresh_summary.budget_info.current_spend:.2f}")
+                st.success("🟢 Cost data refreshed from AWS Cost Explorer API")
+                return True
+        except Exception as e:
+            st.error(f"❌ Failed to refresh cost data: {str(e)}")
+            self.logger.error(f"Failed to force refresh cost data: {e}")
+            return False
+    
     def calculate_metrics(self):
-        """Calculate key financial metrics"""
+        """Calculate key financial metrics using exact Cost Explorer data"""
         if 'usage_summary' in st.session_state:
             usage_summary = st.session_state.usage_summary
             budget_info = usage_summary.budget_info
             
-            # Handle empty/default data gracefully
+            # Ensure we're using the exact Cost Explorer amounts
             current_spend = budget_info.current_spend if budget_info.current_spend is not None else 0.0
             forecast_amount = usage_summary.cost_forecast.forecasted_amount if usage_summary.cost_forecast.forecasted_amount is not None else 0.0
             trend_factor = usage_summary.cost_forecast.trend_factor if usage_summary.cost_forecast.trend_factor is not None else 1.0
+            
+            # Validate that service costs sum matches current spend
+            service_total = sum(sc.cost.amount for sc in usage_summary.service_costs)
+            if abs(service_total - current_spend) > 0.01:  # Allow for small rounding differences
+                self.logger.warning(f"Cost mismatch: Service total ${service_total:.2f} vs Current spend ${current_spend:.2f}")
             
             return {
                 'current_spend': current_spend,
@@ -666,7 +763,9 @@ class VismayaDashboard:
                 'budget_pct': budget_info.utilization_percentage,
                 'forecast': forecast_amount,
                 'trending': 'up' if trend_factor > 1.0 else 'stable' if trend_factor == 1.0 else 'down',
-                'has_resources': len(usage_summary.ec2_instances) > 0 or len(usage_summary.storage_volumes) > 0 or len(usage_summary.database_instances) > 0
+                'has_resources': len(usage_summary.ec2_instances) > 0 or len(usage_summary.storage_volumes) > 0 or len(usage_summary.database_instances) > 0,
+                'service_total': service_total,  # Add for validation
+                'data_source': 'cost_explorer'  # Indicate real data source
             }
         else:
             # Fallback data - simulate no resources scenario
@@ -676,7 +775,9 @@ class VismayaDashboard:
                 'budget_pct': 0.0,
                 'forecast': 0.00,
                 'trending': 'stable',
-                'has_resources': False
+                'has_resources': False,
+                'service_total': 0.00,
+                'data_source': 'default'
             }
     
     def render_header(self):
@@ -891,9 +992,10 @@ class VismayaDashboard:
         # Chat input form with horizontal buttons
         with st.form("chat_form", clear_on_submit=True):
             user_input = st.text_input(
-                "", 
+                "Ask AI Assistant", 
                 placeholder="Ask about your AWS costs, optimization opportunities, or any questions...",
-                key="chat_input_form"
+                key="chat_input_form",
+                label_visibility="collapsed"
             )
             
             # Horizontal button layout with proper spacing
@@ -911,16 +1013,39 @@ class VismayaDashboard:
             
         # Handle form submissions outside the form to prevent blocking
         if submitted and user_input and user_input.strip():
-            # Add user message immediately to show responsiveness
-            st.session_state.chat_history.append({
-                'user': user_input,
-                'assistant': "🤖 Processing your question...",
-                'timestamp': datetime.now(),
-                'processing': True
-            })
+            # Process the question immediately without rerun to avoid screen fading
+            try:
+                # Show processing message
+                with st.spinner("🤖 Processing your question..."):
+                    # Process the question with enhanced context
+                    chat_use_case = self.container.get_use_case('handle_chat')
+                    
+                    # Add current metrics context for better responses
+                    current_metrics = self.calculate_metrics()
+                    enhanced_question = f"{user_input}\n\nContext: Current spend: ${current_metrics['current_spend']:.2f}, Budget: ${current_metrics['budget']:.2f}, Data source: {current_metrics['data_source']}"
+                    
+                    response = asyncio.run(chat_use_case.execute(enhanced_question))
+                
+                # Add the complete conversation to history
+                st.session_state.chat_history.append({
+                    'user': user_input,
+                    'assistant': response,
+                    'timestamp': datetime.now(),
+                    'processing': False
+                })
+                
+            except Exception as e:
+                error_response = f"I'm having trouble accessing your AWS data. Error: {str(e)[:100]}... Please check your AWS connection and try again."
+                
+                # Add error response to history
+                st.session_state.chat_history.append({
+                    'user': user_input,
+                    'assistant': error_response,
+                    'timestamp': datetime.now(),
+                    'processing': False
+                })
             
-            # Store the question for background processing
-            st.session_state.pending_chat_question = user_input
+            # Only rerun after processing is complete
             st.rerun()
         
         elif clear_chat:
@@ -936,37 +1061,20 @@ class VismayaDashboard:
             st.session_state.refresh_requested = True
             st.rerun()
         
-        # Process pending chat question in background
-        if 'pending_chat_question' in st.session_state:
-            question = st.session_state.pending_chat_question
-            del st.session_state.pending_chat_question
-            
-            try:
-                # Process the question
-                chat_use_case = self.container.get_use_case('handle_chat')
-                response = asyncio.run(chat_use_case.execute(question))
-                
-                # Update the last message with the actual response
-                if st.session_state.chat_history and st.session_state.chat_history[-1].get('processing'):
-                    st.session_state.chat_history[-1]['assistant'] = response
-                    st.session_state.chat_history[-1]['processing'] = False
-                
-            except Exception as e:
-                response = f"I'm having trouble accessing your AWS data. Error: {str(e)[:100]}... Please check your AWS connection and try again."
-                
-                # Update the last message with error
-                if st.session_state.chat_history and st.session_state.chat_history[-1].get('processing'):
-                    st.session_state.chat_history[-1]['assistant'] = response
-                    st.session_state.chat_history[-1]['processing'] = False
-            
-            st.rerun()
+        # Background processing removed - now processing immediately above
         
         # Process background data refresh
         if st.session_state.get('refresh_requested', False):
             st.session_state.refresh_requested = False
             
             try:
-                # Use the new use case pattern
+                # Clear cached data to force fresh fetch
+                if 'usage_summary' in st.session_state:
+                    del st.session_state.usage_summary
+                if 'data_loaded' in st.session_state:
+                    del st.session_state.data_loaded
+                
+                # Use the new use case pattern to get fresh data
                 usage_summary_use_case = self.container.get_use_case('get_usage_summary')
                 usage_summary = asyncio.run(usage_summary_use_case.execute())
                 
@@ -975,11 +1083,16 @@ class VismayaDashboard:
                 
                 # Update session state with fresh data
                 st.session_state.usage_summary = usage_summary
+                st.session_state.data_loaded = True
                 st.session_state.last_refresh = datetime.now()
                 
-                st.success("🟢 Data refreshed successfully!")
+                # Validate the refreshed data
+                self.validate_cost_data_consistency()
+                
+                st.success("🟢 Cost data refreshed from AWS Cost Explorer API!")
             except Exception as e:
                 st.error(f"Failed to refresh data: {str(e)[:100]}...")
+                self.logger.error(f"Data refresh failed: {e}")
             
             st.rerun()
         
@@ -1093,9 +1206,10 @@ Recommendations:
         # Chat input form with horizontal buttons
         with st.form("forecasting_chat_form", clear_on_submit=True):
             user_input = st.text_input(
-                "", 
+                "Ask about AWS costs", 
                 placeholder="Ask about AWS resource costs, pricing comparisons, or budget impact...",
-                key="forecasting_chat_input_form"
+                key="forecasting_chat_input_form",
+                label_visibility="collapsed"
             )
             
             # Horizontal button layout
@@ -1111,16 +1225,46 @@ Recommendations:
             
         # Handle form submissions
         if submitted and user_input and user_input.strip():
-            # Add user message immediately to show responsiveness
-            st.session_state.forecasting_chat_history.append({
-                'user': user_input,
-                'assistant': "🤖 Fetching real-time AWS pricing data...",
-                'timestamp': datetime.now(),
-                'processing': True
-            })
+            # Process the question immediately without rerun to avoid screen fading
+            try:
+                # Show processing message
+                with st.spinner("🤖 Processing your cost estimation query..."):
+                    # Process the forecasting question with the new AI assistant
+                    forecasting_ai = self.container.get('forecasting_ai_assistant')
+                    
+                    # Create forecasting context
+                    from src.core.models import ForecastingContext
+                    context = ForecastingContext()
+                    
+                    # Add current usage and budget info if available
+                    if hasattr(st.session_state, 'usage_summary') and st.session_state.usage_summary:
+                        context.current_usage = st.session_state.usage_summary
+                        context.budget_info = st.session_state.usage_summary.budget_info
+                        context.cost_forecast = st.session_state.usage_summary.cost_forecast
+                    
+                    # Get response from forecasting AI
+                    response = asyncio.run(forecasting_ai.chat_response(user_input, context))
+                
+                # Add the complete conversation to history
+                st.session_state.forecasting_chat_history.append({
+                    'user': user_input,
+                    'assistant': response,
+                    'timestamp': datetime.now(),
+                    'processing': False
+                })
+                
+            except Exception as e:
+                error_response = f"I'm having trouble processing your cost estimation request. Error: {str(e)[:100]}... Please try again."
+                
+                # Add error response to history
+                st.session_state.forecasting_chat_history.append({
+                    'user': user_input,
+                    'assistant': error_response,
+                    'timestamp': datetime.now(),
+                    'processing': False
+                })
             
-            # Store the question for background processing
-            st.session_state.pending_forecasting_question = user_input
+            # Only rerun after processing is complete
             st.rerun()
         
         elif clear_chat:
@@ -1162,47 +1306,17 @@ Just ask me about any AWS resource cost!"""
             st.rerun()
         
         elif refresh_pricing:
-            # Clear any pricing cache and refresh
-            st.session_state.pricing_cache_cleared = True
-            st.success("🔄 Pricing cache cleared - next query will fetch fresh data")
+            # Clear any pricing cache and refresh cost data
+            with st.spinner("Refreshing AWS pricing data..."):
+                success = self.force_refresh_cost_data()
+                if success:
+                    st.session_state.pricing_cache_cleared = True
+                    st.success("🔄 AWS cost data refreshed - pricing estimates will use latest data")
+                else:
+                    st.warning("⚠️ Could not refresh data - using cached information")
             st.rerun()
         
-        # Process pending forecasting question in background
-        if 'pending_forecasting_question' in st.session_state:
-            question = st.session_state.pending_forecasting_question
-            del st.session_state.pending_forecasting_question
-            
-            try:
-                # Process the forecasting question with the new AI assistant
-                forecasting_ai = self.container.get('forecasting_ai_assistant')
-                
-                # Create forecasting context
-                from src.core.models import ForecastingContext
-                context = ForecastingContext()
-                
-                # Add current usage and budget info if available
-                if hasattr(st.session_state, 'usage_summary') and st.session_state.usage_summary:
-                    context.current_usage = st.session_state.usage_summary
-                    context.budget_info = st.session_state.usage_summary.budget_info
-                    context.cost_forecast = st.session_state.usage_summary.cost_forecast
-                
-                # Get response from forecasting AI
-                response = asyncio.run(forecasting_ai.chat_response(question, context))
-                
-                # Update the last message with the response
-                if st.session_state.forecasting_chat_history and st.session_state.forecasting_chat_history[-1].get('processing'):
-                    st.session_state.forecasting_chat_history[-1]['assistant'] = response
-                    st.session_state.forecasting_chat_history[-1]['processing'] = False
-                
-            except Exception as e:
-                response = f"I'm having trouble processing your cost estimation request. Error: {str(e)[:100]}... Please try again."
-                
-                # Update the last message with error
-                if st.session_state.forecasting_chat_history and st.session_state.forecasting_chat_history[-1].get('processing'):
-                    st.session_state.forecasting_chat_history[-1]['assistant'] = response
-                    st.session_state.forecasting_chat_history[-1]['processing'] = False
-            
-            st.rerun()
+        # Background processing removed - now processing immediately above
         
         # Forecasting Agent Response section
         st.markdown("---")
@@ -1291,6 +1405,48 @@ Try: "What would a t3.medium instance cost for 2 months?"
     
     def render_current_usage_tab(self):
         """Render the Current Usage tab content"""
+        
+        # Add refresh button at the top with data age information
+        col1, col2, col3 = st.columns([1.5, 2, 2.5])
+        
+        with col1:
+            if st.button("🔄 Refresh from AWS", key="refresh_current_usage", help="Fetch latest data from AWS Cost Explorer API"):
+                with st.spinner("Fetching latest data from AWS Cost Explorer..."):
+                    success = self.force_refresh_cost_data()
+                    if success:
+                        st.rerun()
+        
+        with col2:
+            # Show last refresh time and data age
+            if 'last_refresh' in st.session_state:
+                last_refresh = st.session_state.last_refresh
+                time_ago = datetime.now() - last_refresh
+                
+                if time_ago.total_seconds() < 60:
+                    age_text = f"{int(time_ago.total_seconds())}s ago"
+                    age_color = "🟢"  # Fresh
+                elif time_ago.total_seconds() < 3600:
+                    age_text = f"{int(time_ago.total_seconds()/60)}m ago"
+                    age_color = "🟡"  # Moderate
+                elif time_ago.total_seconds() < 86400:  # 24 hours
+                    age_text = f"{int(time_ago.total_seconds()/3600)}h ago"
+                    age_color = "🟠"  # Old
+                else:
+                    days = int(time_ago.total_seconds()/86400)
+                    age_text = f"{days}d ago"
+                    age_color = "🔴"  # Very old
+                
+                st.caption(f"{age_color} Data from {age_text}")
+            else:
+                st.caption("🔵 No data loaded")
+        
+        with col3:
+            # Show data source indicator
+            if hasattr(st.session_state, 'usage_summary') and st.session_state.usage_summary:
+                st.caption("📊 Using cached data (click refresh for latest)")
+            else:
+                st.caption("⚠️ No cost data available")
+        
         # Get real metrics
         metrics = self.calculate_metrics()
         
@@ -1338,16 +1494,30 @@ Try: "What would a t3.medium instance cost for 2 months?"
         DetailedBillingUI.render_complete_billing_tab()
     
     def render_detailed_usage_tab(self):
-        """Render the Enhanced Detailed Usage tab with proper cost breakdown"""
-        st.subheader("📋 Detailed Cost Breakdown")
+        """Render the Detailed Usage tab with clean cost breakdown and resource overview"""
+        st.subheader("📋 Detailed Usage & Cost Analysis")
         
-        # Add refresh button
-        col1, col2 = st.columns([1, 2])
+        # Add refresh button with data age
+        col1, col2, col3 = st.columns([1.5, 2, 2.5])
         with col1:
-            if st.button("🔄 Refresh", key="refresh_detailed"):
-                if 'data_loaded' in st.session_state:
-                    del st.session_state.data_loaded
-                st.rerun()
+            if st.button("🔄 Refresh from AWS", key="refresh_detailed", help="Fetch latest cost data from AWS Cost Explorer"):
+                with st.spinner("Fetching latest cost data..."):
+                    success = self.force_refresh_cost_data()
+                    if success:
+                        st.rerun()
+        
+        with col2:
+            # Show data age
+            if 'last_refresh' in st.session_state:
+                last_refresh = st.session_state.last_refresh
+                time_ago = datetime.now() - last_refresh
+                if time_ago.total_seconds() < 3600:
+                    st.caption(f"🟢 Data from {int(time_ago.total_seconds()/60)}m ago")
+                else:
+                    st.caption(f"🟠 Data from {int(time_ago.total_seconds()/3600)}h ago")
+        
+        with col3:
+            st.caption("💡 Click refresh to get latest AWS costs")
         
         try:
             if not hasattr(st.session_state, 'usage_summary') or st.session_state.usage_summary is None:
@@ -1365,12 +1535,14 @@ Try: "What would a t3.medium instance cost for 2 months?"
                 st.metric("Total Cost", f"${usage_summary.budget_info.current_spend:.2f}")
             
             with col2:
-                # Calculate tax information
-                total_pre_tax = sum(getattr(sc.cost, 'pre_tax_amount', 0) or 0 for sc in usage_summary.service_costs)
-                if total_pre_tax > 0:
-                    st.metric("Pre-tax Cost", f"${total_pre_tax:.2f}")
+                # Show services count - total services with any activity
+                total_services = len(usage_summary.service_costs) if usage_summary.service_costs else 0
+                paid_services = len([sc for sc in usage_summary.service_costs if sc.cost.amount > 0]) if usage_summary.service_costs else 0
+                
+                if paid_services > 0:
+                    st.metric("Paid Services", f"{paid_services}")
                 else:
-                    st.metric("Services", f"{len([sc for sc in usage_summary.service_costs if sc.cost.amount > 0])}")
+                    st.metric("Total Services", f"{total_services}")
             
             with col3:
                 total_tax = sum(getattr(sc.cost, 'tax_amount', 0) or 0 for sc in usage_summary.service_costs)
@@ -1386,7 +1558,7 @@ Try: "What would a t3.medium instance cost for 2 months?"
             st.markdown("---")
             
             # Service Breakdown Section
-            st.markdown("### 🔍 Service-by-Service Breakdown")
+            st.markdown("### 🔍 Service Breakdown")
             
             # Filter and sort services
             paid_services = [sc for sc in usage_summary.service_costs if sc.cost.amount > 0]
@@ -1394,88 +1566,66 @@ Try: "What would a t3.medium instance cost for 2 months?"
             
             paid_services.sort(key=lambda x: x.cost.amount, reverse=True)
             
-            # Paid Services
-            if paid_services:
-                st.markdown("#### 💳 Paid Services")
+            # Create a clean table view for services
+            if paid_services or free_services:
+                service_data = []
                 
+                # Add paid services
                 for service_cost in paid_services:
                     service_name = getattr(service_cost.cost, 'service_name', service_cost.service_type.value)
                     amount = service_cost.cost.amount
                     usage_qty = getattr(service_cost.cost, 'usage_quantity', None)
-                    pre_tax = getattr(service_cost.cost, 'pre_tax_amount', None)
-                    tax = getattr(service_cost.cost, 'tax_amount', None)
+                    percentage = (amount / usage_summary.budget_info.current_spend * 100) if usage_summary.budget_info.current_spend > 0 else 0
                     
-                    # Create expandable section for each service
-                    with st.expander(f"💳 {service_name} - ${amount:.6f}"):
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            st.write(f"**Total Cost:** ${amount:.6f}")
-                            if pre_tax and pre_tax != amount:
-                                st.write(f"**Pre-tax:** ${pre_tax:.6f}")
-                            if tax and tax > 0:
-                                st.write(f"**Tax:** ${tax:.6f}")
-                        
-                        with col2:
-                            if usage_qty and usage_qty > 0:
-                                cost_per_unit = amount / usage_qty
-                                st.write(f"**Usage:** {usage_qty:.0f} units")
-                                st.write(f"**Cost per Unit:** ${cost_per_unit:.6f}")
-                            
-                            # Calculate percentage of total
-                            percentage = (amount / usage_summary.budget_info.current_spend) * 100
-                            st.write(f"**% of Total:** {percentage:.1f}%")
-            
-            # Free Tier Services
-            if free_services:
-                st.markdown("#### 💸 Free Tier Services")
+                    service_data.append({
+                        "Service": service_name,
+                        "Cost": f"${amount:.2f}",
+                        "Usage": f"{usage_qty:.0f} units" if usage_qty and usage_qty > 0 else "N/A",
+                        "% of Total": f"{percentage:.1f}%",
+                        "Status": "💳 Paid"
+                    })
                 
-                free_service_names = []
-                for service_cost in free_services:
+                # Add free services
+                for service_cost in free_services[:5]:  # Limit free services shown
                     service_name = getattr(service_cost.cost, 'service_name', service_cost.service_type.value)
                     usage_qty = getattr(service_cost.cost, 'usage_quantity', None)
                     
-                    if usage_qty and usage_qty > 0:
-                        free_service_names.append(f"{service_name} ({usage_qty:.0f} units)")
-                    else:
-                        free_service_names.append(service_name)
+                    service_data.append({
+                        "Service": service_name,
+                        "Cost": "$0.00",
+                        "Usage": f"{usage_qty:.0f} units" if usage_qty and usage_qty > 0 else "N/A",
+                        "% of Total": "0.0%",
+                        "Status": "💸 Free"
+                    })
                 
-                # Show free services in a nice format
-                if free_service_names:
-                    st.success(f"**Free Services:** {', '.join(free_service_names[:5])}")
-                    if len(free_service_names) > 5:
-                        st.info(f"...and {len(free_service_names) - 5} more free services")
-            
-            # Cost Analysis Section
-            st.markdown("---")
-            st.markdown("### 📊 Cost Analysis")
-            
-            if paid_services:
-                # Top cost drivers
-                top_service = paid_services[0]
-                top_percentage = (top_service.cost.amount / usage_summary.budget_info.current_spend) * 100
-                
-                st.info(f"**Top Cost Driver:** {getattr(top_service.cost, 'service_name', top_service.service_type.value)} "
-                       f"(${top_service.cost.amount:.6f} - {top_percentage:.1f}% of total)")
-                
-                # Cost distribution chart
-                if len(paid_services) > 1:
-                    import plotly.express as px
+                if service_data:
                     import pandas as pd
+                    df = pd.DataFrame(service_data)
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+                
+                # Show additional free services count
+                if len(free_services) > 5:
+                    st.info(f"💸 Plus {len(free_services) - 5} more free tier services")
+            else:
+                st.info("No service cost data available")
+            
+            # Quick Cost Insights
+            if paid_services:
+                st.markdown("---")
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # Top cost driver
+                    top_service = paid_services[0]
+                    top_percentage = (top_service.cost.amount / usage_summary.budget_info.current_spend) * 100
+                    service_name = getattr(top_service.cost, 'service_name', top_service.service_type.value)
                     
-                    chart_data = []
-                    for sc in paid_services[:10]:  # Top 10 services
-                        service_name = getattr(sc.cost, 'service_name', sc.service_type.value)
-                        chart_data.append({
-                            'Service': service_name[:30],  # Truncate long names
-                            'Cost': sc.cost.amount
-                        })
-                    
-                    df = pd.DataFrame(chart_data)
-                    fig = px.pie(df, values='Cost', names='Service', 
-                               title="Cost Distribution by Service")
-                    fig.update_traces(textposition='inside', textinfo='percent+label')
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.info(f"🎯 **Top Cost Driver**\n{service_name}: ${top_service.cost.amount:.2f} ({top_percentage:.1f}%)")
+                
+                with col2:
+                    # Cost distribution
+                    if len(paid_services) > 1:
+                        st.info(f"📊 **Service Distribution**\n{len(paid_services)} paid services, {len(free_services)} free services")
         
         except Exception as e:
             st.error(f"Error loading detailed usage data: {str(e)}")
@@ -1504,233 +1654,56 @@ Try: "What would a t3.medium instance cost for 2 months?"
             
             # Show message if no resources found
             if ec2_count == 0 and storage_count == 0 and rds_count == 0:
-                st.warning("""
-                🔍 **No AWS resources found in your account (Region: us-east-2)**
-                
-                Your AWS account currently has no billable resources in this region.
-                """)
-                
-                # Show demo mode option
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("📊 Show Demo Data", key="demo_mode"):
-                        st.session_state.demo_mode = True
-                        st.rerun()
-                with col2:
-                    if st.button("🚀 Create Resources", key="create_resources"):
-                        st.info("Visit AWS Console to launch EC2 instances, create RDS databases, or add storage volumes.")
-                
-                # Demo mode toggle
-                if st.session_state.get('demo_mode', False):
-                    st.success("📊 **Demo Mode Active** - Showing sample data for platform demonstration")
-                    
-                    # Override resource details with demo data
-                    resource_details = {
-                        "ec2": {
-                            "instances": [
-                                type('MockInstance', (), {
-                                    'instance_id': 'i-1234567890abcdef0',
-                                    'name': 'Web Server 1',
-                                    'instance_type': 't3.medium',
-                                    'state': type('State', (), {'value': 'running'})(),
-                                    'monthly_cost': 30.40,
-                                    'tags': {'Environment': 'Production', 'Team': 'WebDev'}
-                                })(),
-                                type('MockInstance', (), {
-                                    'instance_id': 'i-0987654321fedcba0',
-                                    'name': 'Database Server',
-                                    'instance_type': 't3.large',
-                                    'state': type('State', (), {'value': 'running'})(),
-                                    'monthly_cost': 60.80,
-                                    'tags': {'Environment': 'Production', 'Team': 'Database'}
-                                })()
-                            ],
-                            "total_monthly_cost": 91.20
-                        },
-                        "storage": {
-                            "volumes": [
-                                type('MockVolume', (), {
-                                    'volume_id': 'vol-1234567890abcdef0',
-                                    'size_gb': 100,
-                                    'volume_type': 'gp3',
-                                    'monthly_cost': 8.0,
-                                    'attached_instance': 'i-1234567890abcdef0'
-                                })(),
-                                type('MockVolume', (), {
-                                    'volume_id': 'vol-0987654321fedcba0',
-                                    'size_gb': 500,
-                                    'volume_type': 'gp3',
-                                    'monthly_cost': 40.0,
-                                    'attached_instance': 'i-0987654321fedcba0'
-                                })()
-                            ],
-                            "total_monthly_cost": 48.0
-                        },
-                        "databases": {
-                            "databases": [
-                                type('MockDB', (), {
-                                    'db_instance_id': 'prod-db-1',
-                                    'engine': 'mysql',
-                                    'instance_class': 'db.t3.medium',
-                                    'monthly_cost': 49.64,
-                                    'status': 'available'
-                                })()
-                            ],
-                            "total_monthly_cost": 49.64
-                        },
-                        "total_monthly_cost": 188.84
-                    }
-                    
-                    # Update metrics with demo data
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric("EC2 Instances", 2, help="Demo: 2 running instances")
-                    with col2:
-                        st.metric("Storage Volumes", 2, help="Demo: 2 attached volumes")
-                    with col3:
-                        st.metric("RDS Instances", 1, help="Demo: 1 MySQL database")
-                    with col4:
-                        st.metric("Total Monthly Cost", "$188.84", help="Demo: Estimated monthly cost")
-                else:
-                    # Add region selector for real data
-                    st.markdown("### 🌍 Try Different Region")
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        selected_region = st.selectbox(
-                            "Select AWS Region",
-                            ["us-east-1", "us-east-2", "us-west-1", "us-west-2", "eu-west-1", "eu-central-1"],
-                            index=1  # us-east-2 default
-                        )
-                    with col2:
-                        if st.button("🔄 Check This Region"):
-                            st.info(f"To check {selected_region}, update your AWS_REGION in .env file and restart the application.")
-                    
-                    return  # Skip the rest of the detailed view if not in demo mode
+                st.info("🔍 **No AWS resources found** - Your account has no billable resources in the current region.")
+                return
             
-            # EC2 Instances
-            st.markdown("### 🖥️ EC2 Instances")
+            # Resource Overview
+            st.markdown("---")
+            st.markdown("### 🔍 Resource Overview")
+            
+            # Simple resource tables
             if resource_details["ec2"]["instances"]:
+                st.markdown("#### 🖥️ EC2 Instances")
                 ec2_data = []
                 for instance in resource_details["ec2"]["instances"]:
-                    # Get additional details
-                    tags_str = ", ".join([f"{k}:{v}" for k, v in instance.tags.items()]) if instance.tags else "None"
-                    
                     ec2_data.append({
                         "Instance ID": instance.instance_id,
                         "Name": instance.name or "N/A",
                         "Type": instance.instance_type,
                         "State": instance.state.value,
-                        "Monthly Cost": f"${instance.monthly_cost:.2f}",
-                        "Tags": tags_str[:50] + "..." if len(tags_str) > 50 else tags_str
+                        "Monthly Cost": f"${instance.monthly_cost:.2f}"
                     })
                 
-                st.dataframe(pd.DataFrame(ec2_data), width='stretch')
-                
-                # EC2 cost breakdown
-                if len(ec2_data) > 0:
-                    st.markdown("#### EC2 Cost Analysis")
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        # Cost by instance type
-                        type_costs = {}
-                        for instance in resource_details["ec2"]["instances"]:
-                            if instance.instance_type not in type_costs:
-                                type_costs[instance.instance_type] = 0
-                            type_costs[instance.instance_type] += instance.monthly_cost
-                        
-                        if type_costs:
-                            fig = go.Figure(data=[
-                                go.Pie(labels=list(type_costs.keys()), 
-                                      values=list(type_costs.values()),
-                                      title="Cost by Instance Type")
-                            ])
-                            st.plotly_chart(fig, use_container_width=True)
-                    
-                    with col2:
-                        # State distribution
-                        state_counts = {}
-                        for instance in resource_details["ec2"]["instances"]:
-                            state = instance.state.value
-                            state_counts[state] = state_counts.get(state, 0) + 1
-                        
-                        if state_counts:
-                            fig = go.Figure(data=[
-                                go.Bar(x=list(state_counts.keys()), 
-                                      y=list(state_counts.values()))
-                            ])
-                            fig.update_layout(title="Instances by State")
-                            st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("No EC2 instances found in your AWS account")
+                import pandas as pd
+                st.dataframe(pd.DataFrame(ec2_data), use_container_width=True, hide_index=True)
             
-            # Storage
-            st.markdown("### 💾 Storage Usage")
             if resource_details["storage"]["volumes"]:
+                st.markdown("#### 💾 Storage Volumes")
                 storage_data = []
-                total_storage_gb = 0
-                
                 for volume in resource_details["storage"]["volumes"]:
-                    total_storage_gb += volume.size_gb
                     storage_data.append({
                         "Volume ID": volume.volume_id,
-                        "Size (GB)": volume.size_gb,
+                        "Size": f"{volume.size_gb} GB",
                         "Type": volume.volume_type,
-                        "Attached To": volume.attached_instance or "⚠️ Unattached",
-                        "Monthly Cost": f"${volume.monthly_cost:.2f}",
-                        "Cost per GB": f"${volume.monthly_cost/volume.size_gb:.3f}" if volume.size_gb > 0 else "N/A"
+                        "Status": "Attached" if volume.attached_instance else "⚠️ Unattached",
+                        "Monthly Cost": f"${volume.monthly_cost:.2f}"
                     })
                 
-                st.dataframe(pd.DataFrame(storage_data), width='stretch')
-                
-                # Storage insights
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Total Storage", f"{total_storage_gb:,} GB")
-                with col2:
-                    unattached_volumes = len([v for v in resource_details["storage"]["volumes"] if not v.attached_instance])
-                    if unattached_volumes > 0:
-                        st.metric("⚠️ Unattached Volumes", unattached_volumes)
-                    else:
-                        st.metric("✅ All Volumes Attached", "0")
-                
-                # Storage optimization suggestions
-                if unattached_volumes > 0:
-                    st.warning(f"💡 **Optimization Opportunity**: You have {unattached_volumes} unattached EBS volumes. Consider deleting unused volumes to save costs.")
-                
-            else:
-                st.info("No EBS volumes found in your AWS account")
+                st.dataframe(pd.DataFrame(storage_data), use_container_width=True, hide_index=True)
             
-            # Database
-            st.markdown("### 🗄️ RDS Instances")
             if resource_details["databases"]["databases"]:
+                st.markdown("#### 🗄️ RDS Databases")
                 rds_data = []
                 for db in resource_details["databases"]["databases"]:
                     rds_data.append({
                         "DB Instance": db.db_instance_id,
                         "Engine": db.engine,
-                        "Instance Class": db.instance_class,
+                        "Class": db.instance_class,
                         "Status": db.status,
                         "Monthly Cost": f"${db.monthly_cost:.2f}"
                     })
                 
-                st.dataframe(pd.DataFrame(rds_data), width='stretch')
-                
-                # Database cost analysis
-                if len(rds_data) > 0:
-                    engine_costs = {}
-                    for db in resource_details["databases"]["databases"]:
-                        engine_costs[db.engine] = engine_costs.get(db.engine, 0) + db.monthly_cost
-                    
-                    if len(engine_costs) > 1:
-                        fig = go.Figure(data=[
-                            go.Bar(x=list(engine_costs.keys()), 
-                                  y=list(engine_costs.values()))
-                        ])
-                        fig.update_layout(title="Database Costs by Engine")
-                        st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("No RDS instances found in your AWS account")
+                st.dataframe(pd.DataFrame(rds_data), use_container_width=True, hide_index=True)
             
             # Cost optimization recommendations
             st.markdown("### 💡 Cost Optimization Recommendations")
@@ -1789,6 +1762,11 @@ Try: "What would a t3.medium instance cost for 2 months?"
         
         # Get real metrics for context
         metrics = self.calculate_metrics()
+        
+        # 🤖 FORECASTING AI ASSISTANT - MOVED TO TOP FOR BETTER VISIBILITY
+        st.markdown("---")
+        st.markdown("### 🤖 Forecasting AI Assistant")
+        self.render_forecasting_ai_assistant(metrics)
         
         try:
             if not hasattr(st.session_state, 'usage_summary') or st.session_state.usage_summary is None:
@@ -2063,27 +2041,241 @@ Try: "What would a t3.medium instance cost for 2 months?"
             
             st.plotly_chart(fig, use_container_width=True)
             
-            # Add AI Assistant section for forecasting
-            st.markdown("---")
-            st.markdown("### 🤖 Forecasting AI Assistant")
-            self.render_forecasting_ai_assistant(metrics)
-            
         except Exception as e:
             st.error(f"Error loading forecast data: {e}")
             st.info("Please refresh the page or check your AWS connection.")
     
     def render_historical_tab(self):
-        """Render the Historical Data tab content"""
-        st.subheader("Historical Cost Analysis")
+        """Render the Historical Data tab with actual project history"""
+        st.subheader("📈 Project Cost History")
         
-        st.info("📊 Historical data analysis coming soon!")
-        st.markdown("""
-        This section will include:
-        - 12-month cost trends
-        - Year-over-year comparisons
-        - Seasonal patterns
-        - Cost anomaly detection
-        """)
+        # Add refresh button for historical data
+        col1, col2, col3 = st.columns([1.5, 2, 2.5])
+        with col1:
+            if st.button("🔄 Refresh History", key="refresh_historical", help="Update historical data from database"):
+                st.rerun()
+        
+        with col2:
+            # Show data range
+            st.caption("📅 Showing data since project start")
+        
+        with col3:
+            st.caption("💡 Historical data from SQLite database")
+        
+        try:
+            # Get historical data from SQLite
+            historical_summaries = asyncio.run(self.repository.get_historical_summaries(30))  # Last 30 days
+            
+            if not historical_summaries:
+                st.warning("📊 No historical data found. Data will accumulate as you use the platform.")
+                st.info("""
+                **Historical data will show:**
+                - Daily cost trends since project start
+                - Resource additions and removals
+                - Service usage patterns
+                - Cost impact of changes
+                
+                **To build history:** Use the platform regularly and refresh cost data periodically.
+                """)
+                return
+            
+            # Historical Overview
+            st.markdown("### 📊 Cost Trend Overview")
+            
+            # Calculate key metrics
+            latest_summary = historical_summaries[0]
+            oldest_summary = historical_summaries[-1]
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                current_cost = latest_summary.budget_info.current_spend
+                st.metric("Current Cost", f"${current_cost:.2f}")
+            
+            with col2:
+                if len(historical_summaries) > 1:
+                    previous_cost = historical_summaries[1].budget_info.current_spend if len(historical_summaries) > 1 else current_cost
+                    cost_change = current_cost - previous_cost
+                    st.metric("Change from Previous", f"${cost_change:.2f}", delta=f"${cost_change:.2f}")
+                else:
+                    st.metric("Days Tracked", "1")
+            
+            with col3:
+                days_tracked = len(historical_summaries)
+                st.metric("Days Tracked", f"{days_tracked}")
+            
+            with col4:
+                if days_tracked > 1:
+                    total_change = current_cost - oldest_summary.budget_info.current_spend
+                    st.metric("Total Change", f"${total_change:.2f}", delta=f"${total_change:.2f}")
+                else:
+                    st.metric("Avg Daily Cost", f"${current_cost:.2f}")
+            
+            # Cost Trend Chart
+            st.markdown("---")
+            st.markdown("### 📈 Daily Cost Trend")
+            
+            if len(historical_summaries) > 1:
+                import plotly.graph_objects as go
+                import pandas as pd
+                
+                # Prepare data for chart
+                dates = [summary.last_updated.strftime('%Y-%m-%d') for summary in reversed(historical_summaries)]
+                costs = [summary.budget_info.current_spend for summary in reversed(historical_summaries)]
+                
+                # Create trend chart
+                fig = go.Figure()
+                
+                fig.add_trace(go.Scatter(
+                    x=dates,
+                    y=costs,
+                    mode='lines+markers',
+                    name='Daily Cost',
+                    line=dict(color='blue', width=3),
+                    marker=dict(size=8),
+                    hovertemplate='<b>%{x}</b><br>Cost: $%{y:.2f}<extra></extra>'
+                ))
+                
+                fig.update_layout(
+                    title="Cost Trend Over Time",
+                    xaxis_title="Date",
+                    yaxis_title="Cost ($)",
+                    height=400,
+                    showlegend=False
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("📊 Chart will appear after collecting more daily data points.")
+            
+            # Service History Analysis
+            st.markdown("---")
+            st.markdown("### 🔍 Service Usage History")
+            
+            # Analyze service changes over time
+            service_history = {}
+            for summary in historical_summaries:
+                date_key = summary.last_updated.strftime('%Y-%m-%d')
+                service_history[date_key] = {}
+                
+                for service_cost in summary.service_costs:
+                    service_name = getattr(service_cost.cost, 'service_name', service_cost.service_type.value)
+                    service_history[date_key][service_name] = service_cost.cost.amount
+            
+            if service_history:
+                # Show service summary
+                all_services = set()
+                for day_services in service_history.values():
+                    all_services.update(day_services.keys())
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("#### 📋 Services Used")
+                    if all_services:
+                        for service in sorted(all_services):
+                            # Check if service is currently active
+                            latest_cost = service_history[dates[-1] if dates else list(service_history.keys())[-1]].get(service, 0)
+                            if latest_cost > 0:
+                                st.success(f"✅ {service}: ${latest_cost:.2f}")
+                            else:
+                                st.info(f"💤 {service}: Inactive")
+                    else:
+                        st.info("No services found in historical data")
+                
+                with col2:
+                    st.markdown("#### 📊 Cost Distribution")
+                    if latest_summary.service_costs:
+                        # Show current service costs
+                        for service_cost in sorted(latest_summary.service_costs, key=lambda x: x.cost.amount, reverse=True)[:5]:
+                            service_name = getattr(service_cost.cost, 'service_name', service_cost.service_type.value)
+                            amount = service_cost.cost.amount
+                            if amount > 0:
+                                percentage = (amount / current_cost * 100) if current_cost > 0 else 0
+                                st.write(f"• **{service_name}**: ${amount:.2f} ({percentage:.1f}%)")
+            
+            # Resource Changes Timeline
+            st.markdown("---")
+            st.markdown("### 🔄 Resource Changes Timeline")
+            
+            # Show recent changes in resource counts
+            if len(historical_summaries) > 1:
+                latest = historical_summaries[0]
+                previous = historical_summaries[1]
+                
+                # Compare resource counts
+                latest_ec2 = len(latest.ec2_instances)
+                previous_ec2 = len(previous.ec2_instances)
+                ec2_change = latest_ec2 - previous_ec2
+                
+                latest_storage = len(latest.storage_volumes)
+                previous_storage = len(previous.storage_volumes)
+                storage_change = latest_storage - previous_storage
+                
+                latest_rds = len(latest.database_instances)
+                previous_rds = len(previous.database_instances)
+                rds_change = latest_rds - previous_rds
+                
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric("EC2 Instances", latest_ec2, delta=ec2_change if ec2_change != 0 else None)
+                
+                with col2:
+                    st.metric("Storage Volumes", latest_storage, delta=storage_change if storage_change != 0 else None)
+                
+                with col3:
+                    st.metric("RDS Instances", latest_rds, delta=rds_change if rds_change != 0 else None)
+                
+                # Show change summary
+                changes = []
+                if ec2_change > 0:
+                    changes.append(f"➕ Added {ec2_change} EC2 instance(s)")
+                elif ec2_change < 0:
+                    changes.append(f"➖ Removed {abs(ec2_change)} EC2 instance(s)")
+                
+                if storage_change > 0:
+                    changes.append(f"➕ Added {storage_change} storage volume(s)")
+                elif storage_change < 0:
+                    changes.append(f"➖ Removed {abs(storage_change)} storage volume(s)")
+                
+                if rds_change > 0:
+                    changes.append(f"➕ Added {rds_change} RDS instance(s)")
+                elif rds_change < 0:
+                    changes.append(f"➖ Removed {abs(rds_change)} RDS instance(s)")
+                
+                if changes:
+                    st.markdown("#### 📝 Recent Changes")
+                    for change in changes:
+                        st.write(f"• {change}")
+                else:
+                    st.info("📊 No resource changes detected in recent data")
+            
+            # Data Collection Info
+            st.markdown("---")
+            st.markdown("### ℹ️ About Historical Data")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("""
+                **Data Source:**
+                - SQLite database records
+                - Cost Explorer API snapshots
+                - Resource inventory tracking
+                """)
+            
+            with col2:
+                st.markdown(f"""
+                **Data Range:**
+                - Oldest record: {oldest_summary.last_updated.strftime('%Y-%m-%d %H:%M')}
+                - Latest record: {latest_summary.last_updated.strftime('%Y-%m-%d %H:%M')}
+                - Total snapshots: {len(historical_summaries)}
+                """)
+            
+        except Exception as e:
+            st.error(f"Error loading historical data: {str(e)}")
+            st.info("Please refresh the page or check your database connection.")
     
     def render_settings_tab(self):
         """Render the Settings tab content"""
@@ -2173,6 +2365,9 @@ Try: "What would a t3.medium instance cost for 2 months?"
         # Render main dashboard
         self.render_header()
         self.load_data()
+        
+        # Validate cost data consistency
+        self.validate_cost_data_consistency()
         
         # Navigation
         tab1, tab2, tab3, tab4, tab5, tab6 = self.render_navigation()
