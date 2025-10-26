@@ -1,0 +1,48 @@
+# Minimal Requirements - Core packages only
+# Use this if you encounter package installation issues
+
+# Core Web Framework
+streamlit>=1.28.0,<2.0.0
+
+# AWS Services
+boto3>=1.34.0,<2.0.0
+botocore>=1.34.0,<2.0.0
+
+# Data Processing & Analysis
+pandas>=2.0.0,<3.0.0
+numpy>=1.24.0,<2.0.0
+
+# Visualization
+plotly>=5.17.0,<6.0.0
+
+# Environment & Configuration
+python-dotenv>=1.0.0,<2.0.0
+
+# HTTP Requests
+requests>=2.31.0,<3.0.0
+
+# System Utilities
+setuptools>=65.0.0
+psutil>=5.9.0,<6.0.0
+
+# Async Programming
+aiofiles>=23.0.0,<24.0.0
+aiohttp>=3.9.0,<4.0.0
+websockets>=12.0,<13.0.0
+
+# Data Validation & Serialization
+pydantic>=2.5.0,<3.0.0
+
+# Security & Authentication
+cryptography>=41.0.0,<42.0.0
+
+# Date & Time
+python-dateutil>=2.8.0,<3.0.0
+pytz>=2023.3
+
+# JSON & Data Formats
+jsonschema>=4.20.0,<5.0.0
+pyyaml>=6.0.1,<7.0.0
+
+# Development & Debugging
+rich>=13.7.0,<14.0.0

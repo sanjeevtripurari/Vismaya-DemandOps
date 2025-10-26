@@ -11,6 +11,7 @@ from pathlib import Path
 from src.application.dependency_injection import DependencyContainer
 from src.core.models import ScenarioInput
 from src.ui.credentials_manager import CredentialsManager
+from src.ui.enhanced_dashboard import EnhancedDashboard
 from src.infrastructure.sqlite_repository import SQLiteRepository
 from config import Config
 
@@ -2362,6 +2363,24 @@ Try: "What would a t3.medium instance cost for 2 months?"
             CredentialsSetupUI.render_credentials_setup()
             return
         
+        # Check if enhanced dashboard is enabled
+        use_enhanced_dashboard = st.sidebar.checkbox(
+            "🚀 Use Enhanced Dashboard", 
+            value=st.session_state.get('use_enhanced_dashboard', False),
+            help="Switch to the new enhanced dashboard with modern UI and AI features"
+        )
+        st.session_state.use_enhanced_dashboard = use_enhanced_dashboard
+        
+        if use_enhanced_dashboard:
+            # Use the new enhanced dashboard
+            enhanced_dashboard = EnhancedDashboard(self.container)
+            enhanced_dashboard.render_enhanced_dashboard()
+        else:
+            # Use the classic dashboard
+            self._render_classic_dashboard()
+    
+    def _render_classic_dashboard(self):
+        """Render the classic dashboard interface"""
         # Render main dashboard
         self.render_header()
         self.load_data()

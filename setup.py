@@ -1,144 +1,101 @@
 #!/usr/bin/env python3
 """
-Setup script for Vismaya DemandOps
-Handles Python version compatibility and dependency installation
+Setup script for Vismaya DemandOps Agentic AI System
 """
 
-import sys
-import subprocess
-import os
+from setuptools import setup, find_packages
+from pathlib import Path
 
-def check_python_version():
-    """Check if Python version is compatible"""
-    version = sys.version_info
-    if version.major < 3 or (version.major == 3 and version.minor < 8):
-        print("❌ Python 3.8+ is required")
-        print(f"   Current version: {version.major}.{version.minor}.{version.micro}")
-        sys.exit(1)
-    
-    print(f"✅ Python {version.major}.{version.minor}.{version.micro} detected")
-    return version
+# Read the README file
+readme_file = Path(__file__).parent / "README.md"
+long_description = readme_file.read_text(encoding="utf-8") if readme_file.exists() else ""
 
-def install_setuptools():
-    """Install setuptools if missing"""
-    try:
-        import setuptools
-        print("✅ setuptools already installed")
-    except ImportError:
-        print("📦 Installing setuptools...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "setuptools>=65.0.0"])
-        print("✅ setuptools installed")
+# Read requirements
+requirements_file = Path(__file__).parent / "requirements.txt"
+requirements = []
+if requirements_file.exists():
+    with open(requirements_file, 'r', encoding='utf-8') as f:
+        requirements = [
+            line.strip() 
+            for line in f 
+            if line.strip() and not line.startswith('#') and not line.startswith('-r')
+        ]
 
-def install_pip_tools():
-    """Install pip-tools for better dependency management"""
-    try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "pip"])
-        print("✅ pip upgraded")
-    except subprocess.CalledProcessError as e:
-        print(f"⚠️  Warning: Could not upgrade pip: {e}")
-
-def install_requirements():
-    """Install project requirements"""
-    print("📦 Installing project dependencies...")
-    try:
-        # Install requirements with better error handling
-        subprocess.check_call([
-            sys.executable, "-m", "pip", "install", 
-            "--upgrade",
-            "--no-cache-dir",
-            "-r", "requirements.txt"
-        ])
-        print("✅ All dependencies installed successfully")
-        return True
-    except subprocess.CalledProcessError as e:
-        print(f"❌ Error installing dependencies: {e}")
-        print("\n🔧 Trying alternative installation method...")
-        
-        # Try installing packages one by one
-        with open('requirements.txt', 'r') as f:
-            packages = [line.strip() for line in f if line.strip() and not line.startswith('#')]
-        
-        failed_packages = []
-        for package in packages:
-            try:
-                subprocess.check_call([sys.executable, "-m", "pip", "install", package])
-                print(f"✅ Installed: {package}")
-            except subprocess.CalledProcessError:
-                print(f"❌ Failed: {package}")
-                failed_packages.append(package)
-        
-        if failed_packages:
-            print(f"\n⚠️  Some packages failed to install: {failed_packages}")
-            print("The application may still work with mock data")
-            return False
-        
-        return True
-
-def create_virtual_env():
-    """Create virtual environment if not exists"""
-    if hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix):
-        print("✅ Virtual environment detected")
-        return True
+setup(
+    name="vismaya-demandops-agentic",
+    version="1.0.0",
+    description="Agentic AI System for AWS Cost Management and Resource Optimization",
+    long_description=long_description,
+    long_description_content_type="text/markdown",
+    author="Vismaya DemandOps Team",
+    author_email="team@vismaya.com",
+    url="https://github.com/vismaya/demandops-agentic",
     
-    print("⚠️  No virtual environment detected")
-    response = input("Create virtual environment? (y/n): ").lower().strip()
+    packages=find_packages(where="src"),
+    package_dir={"": "src"},
     
-    if response == 'y':
-        try:
-            subprocess.check_call([sys.executable, "-m", "venv", "venv"])
-            print("✅ Virtual environment created")
-            print("🔄 Please activate it and run setup again:")
-            if os.name == 'nt':  # Windows
-                print("   venv\\Scripts\\activate")
-            else:  # Unix/Linux/Mac
-                print("   source venv/bin/activate")
-            print("   python setup.py")
-            return False
-        except subprocess.CalledProcessError as e:
-            print(f"❌ Error creating virtual environment: {e}")
-            return False
+    python_requires=">=3.9",
+    install_requires=requirements,
     
-    return True
-
-def main():
-    """Main setup function"""
-    print("=" * 50)
-    print("🛠️  Vismaya DemandOps - Setup")
-    print("=" * 50)
+    extras_require={
+        "dev": [
+            "black>=23.12.0",
+            "isort>=5.13.0",
+            "flake8>=7.0.0",
+            "pylint>=3.0.0",
+            "pytest>=7.4.0",
+            "pytest-asyncio>=0.23.0",
+            "pytest-cov>=4.1.0",
+            "mypy>=1.8.0",
+        ],
+        "docs": [
+            "sphinx>=7.2.0",
+            "sphinx-rtd-theme>=2.0.0",
+            "myst-parser>=2.0.0",
+        ],
+        "test": [
+            "pytest>=7.4.0",
+            "pytest-asyncio>=0.23.0",
+            "pytest-mock>=3.12.0",
+            "pytest-cov>=4.1.0",
+            "pytest-xdist>=3.5.0",
+        ]
+    },
     
-    # Check Python version
-    version = check_python_version()
+    entry_points={
+        "console_scripts": [
+            "vismaya-migrate=agentic.migration.enable_all_features:main",
+            "vismaya-demo=demo_migration:main",
+        ],
+    },
     
-    # Handle Python 3.12+ distutils issue
-    if version.major == 3 and version.minor >= 12:
-        print("🔧 Python 3.12+ detected - installing compatibility packages...")
-        install_setuptools()
+    classifiers=[
+        "Development Status :: 4 - Beta",
+        "Intended Audience :: Developers",
+        "Intended Audience :: System Administrators",
+        "License :: OSI Approved :: MIT License",
+        "Operating System :: OS Independent",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
+        "Topic :: Software Development :: Libraries :: Python Modules",
+        "Topic :: System :: Systems Administration",
+        "Topic :: Office/Business :: Financial",
+    ],
     
-    # Check virtual environment
-    if not create_virtual_env():
-        return
+    keywords=[
+        "aws", "cost-management", "ai", "agents", "automation", 
+        "cloud", "finops", "devops", "machine-learning"
+    ],
     
-    # Upgrade pip and install tools
-    install_pip_tools()
+    project_urls={
+        "Bug Reports": "https://github.com/vismaya/demandops-agentic/issues",
+        "Source": "https://github.com/vismaya/demandops-agentic",
+        "Documentation": "https://demandops-agentic.readthedocs.io/",
+    },
     
-    # Install setuptools first
-    install_setuptools()
-    
-    # Install requirements
-    success = install_requirements()
-    
-    print("\n" + "=" * 50)
-    if success:
-        print("🎉 Setup completed successfully!")
-        print("\n🚀 Next steps:")
-        print("   1. Configure AWS: python aws-setup.py")
-        print("   2. Test locally: python local-test.py")
-        print("   3. Run app: python app.py")
-    else:
-        print("⚠️  Setup completed with warnings")
-        print("   The app may work with limited functionality")
-        print("\n🚀 Try running: python app.py")
-    print("=" * 50)
-
-if __name__ == "__main__":
-    main()
+    include_package_data=True,
+    zip_safe=False,
+)
