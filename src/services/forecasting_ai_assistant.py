@@ -356,10 +356,10 @@ class ForecastingAIAssistant(IForecastingAIAssistant):
             response_parts.append(f"\n💾 **Storage:** {cost_estimate.storage_note}")
         
         if hasattr(cost_estimate, 'database_note') and cost_estimate.database_note:
-            response_parts.append(f"\n🗄️ **Database:** {cost_estimate.database_note}")
+            response_parts.append(f"\n🗄️ **PostgreSQL:** {cost_estimate.database_note}")
         
         if hasattr(cost_estimate, 'multi_resource_notes') and cost_estimate.multi_resource_notes:
-            response_parts.append(f"\n📝 **Note:** {cost_estimate.multi_resource_notes}")
+            response_parts.append(f"\n📝 **Additional:** {cost_estimate.multi_resource_notes}")
         
         # Refinement suggestions
         if cost_estimate.refinement_suggestions:

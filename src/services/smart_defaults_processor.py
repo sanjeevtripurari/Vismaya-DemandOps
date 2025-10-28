@@ -55,7 +55,8 @@ class SmartDefaultsProcessor:
         # Common patterns for extracting information from queries
         self.patterns = {
             'quantity': r'(\d+)\s*(?:x\s*)?(?:\w+\.\w+\s+)?(?:instances?|servers?|databases?|volumes?|ec2|rds)',
-            'instance_type': r'(t3\.\w+|m5\.\w+|c5\.\w+|r5\.\w+|db\.t3\.\w+|db\.m5\.\w+)',
+            'instance_type': r'(t3\.(?:nano|micro|small|medium|large|xlarge|2xlarge)|m5\.(?:large|xlarge|2xlarge|4xlarge)|c5\.(?:large|xlarge|2xlarge|4xlarge)|r5\.(?:large|xlarge|2xlarge|4xlarge)|db\.t3\.(?:micro|small|medium|large)|db\.m5\.(?:large|xlarge|2xlarge))',
+            'medium_instance': r'(?:medium|med)\s*(?:instances?|servers?)',
             'storage_size': r'(\d+)\s*(?:gb|tb|gib|tib)',
             'duration': r'(?:for\s+)?(\d+)\s*(?:months?|month|mo|years?|year|yr|days?|day)',
             'region': r'(?:in\s+|region\s+)?(us-east-\d|us-west-\d|eu-west-\d|eu-central-\d|ap-southeast-\d)'
@@ -69,6 +70,13 @@ class SmartDefaultsProcessor:
         
         # Detect all resource types mentioned
         detected_resources = self._detect_all_resource_types(query)
+        
+        # Also check for storage and database mentions
+        has_storage = any(term in query_lower for term in ['gb', 'storage', 'disk', 'volume'])
+        has_database = any(term in query_lower for term in ['postgres', 'postgresql', 'database', 'db'])
+        
+        if has_storage or has_database:
+            detected_resources.append('multi_component')
         
         # For complex queries with multiple resources, prioritize the first mentioned
         if len(detected_resources) > 1:
@@ -155,6 +163,11 @@ class SmartDefaultsProcessor:
             instance_match = re.search(self.patterns['instance_type'], query, re.IGNORECASE)
             if instance_match:
                 extracted['instance_type'] = instance_match.group(1).lower()
+            else:
+                # Check for "medium" keyword and default to t3.medium
+                medium_match = re.search(self.patterns['medium_instance'], query, re.IGNORECASE)
+                if medium_match:
+                    extracted['instance_type'] = 't3.medium'
             
             # Extract storage size
             storage_match = re.search(self.patterns['storage_size'], query, re.IGNORECASE)
@@ -358,15 +371,21 @@ class SmartDefaultsProcessor:
             if storage_match:
                 storage_size = int(storage_match.group(1))
                 quantity = result.get('quantity', 1)
+                duration_months = result.get('duration_months', 1)
                 total_storage = storage_size * quantity
-                storage_cost = total_storage * 0.08  # GP3 pricing per GB/month
-                result['storage_note'] = f"Additional storage cost: ~${storage_cost:.2f}/month for {total_storage}GB GP3 EBS storage ({quantity}x {storage_size}GB)"
+                storage_cost_monthly = total_storage * 0.08  # GP3 pricing per GB/month
+                storage_cost_total = storage_cost_monthly * duration_months
+                result['storage_note'] = f"EBS Storage: ${storage_cost_total:.2f} total (${storage_cost_monthly:.2f}/month for {total_storage}GB GP3 - {quantity}x {storage_size}GB)"
         
-        # Add database note if PostgreSQL is mentioned
-        if any(term in query_lower for term in ['postgres', 'postgresql']):
-            postgres_match = re.search(r'(\d+)\s*postgres', query_lower)
+        # Add database note if PostgreSQL is mentioned (handle typos like "progres")
+        if any(term in query_lower for term in ['postgres', 'postgresql', 'progres']):
+            postgres_match = re.search(r'(\d+)\s*(?:postgres|postgresql|progres)', query_lower)
             if postgres_match:
                 postgres_count = postgres_match.group(1)
-                result['database_note'] = f"PostgreSQL costs not included. For {postgres_count} PostgreSQL databases, ask: 'cost of {postgres_count} PostgreSQL databases'"
+                duration_months = result.get('duration_months', 1)
+                # Estimate PostgreSQL cost (db.t3.micro)
+                postgres_monthly_cost = 17.0 * int(postgres_count)  # ~$17/month for db.t3.micro
+                postgres_total_cost = postgres_monthly_cost * duration_months
+                result['database_note'] = f"PostgreSQL: ~${postgres_total_cost:.2f} total (${postgres_monthly_cost:.2f}/month for {postgres_count}x db.t3.micro PostgreSQL)"
             else:
                 result['database_note'] = "PostgreSQL costs not included. Ask separately: 'cost of PostgreSQL database'"
