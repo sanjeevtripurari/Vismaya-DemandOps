@@ -5252,7 +5252,7 @@ Try: "What would a t3.medium instance cost for 2 months?"
         # Check if enhanced dashboard is enabled
         use_enhanced_dashboard = st.sidebar.checkbox(
             "🚀 Use Enhanced Dashboard", 
-            value=st.session_state.get('use_enhanced_dashboard', False),
+            value=st.session_state.get('use_enhanced_dashboard', True),
             help="Switch to the new enhanced dashboard with modern UI and AI features"
         )
         st.session_state.use_enhanced_dashboard = use_enhanced_dashboard

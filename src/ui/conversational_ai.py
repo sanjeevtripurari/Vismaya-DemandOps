@@ -976,6 +976,63 @@ class ConversationalAIInterface:
             st.balloons()
             st.rerun()
     
+    def _render_guided_complete(self):
+        """Render guided interaction completion screen"""
+        st.markdown("#### 🎉 Optimization Complete!")
+        st.progress(1.0)
+        
+        st.success("🎊 Congratulations! You've completed the guided cost optimization process.")
+        
+        # Summary of what was accomplished
+        st.markdown("**📊 Summary of Your Optimization Journey:**")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("""
+            **✅ What You've Accomplished:**
+            - Analyzed your current AWS costs
+            - Identified optimization opportunities
+            - Created an implementation plan
+            - Set up monitoring and tracking
+            """)
+        
+        with col2:
+            st.markdown("""
+            **📈 Expected Benefits:**
+            - Reduced monthly AWS costs
+            - Improved resource utilization
+            - Better cost visibility
+            - Ongoing optimization insights
+            """)
+        
+        # Next steps
+        st.markdown("**🚀 What's Next:**")
+        st.info("""
+        - Continue monitoring your costs in the main dashboard
+        - Set up budget alerts for proactive management
+        - Schedule regular optimization reviews
+        - Explore advanced features in Expert Mode
+        """)
+        
+        # Action buttons
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("🔄 Start New Optimization", type="primary"):
+                st.session_state.guided_step = 'start'
+                st.rerun()
+        
+        with col2:
+            if st.button("📊 View Dashboard"):
+                st.session_state.chat_mode = 'assistant'
+                st.rerun()
+        
+        with col3:
+            if st.button("🔬 Expert Mode"):
+                st.session_state.chat_mode = 'expert'
+                st.rerun()
+    
     def _render_advanced_query_builder(self):
         """Render advanced query builder for expert mode"""
         st.markdown("**🔧 Advanced Query Builder:**")
