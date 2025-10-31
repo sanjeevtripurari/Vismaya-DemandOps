@@ -1,1 +1,1 @@
-# Core domain models and interfaces
+# Core pricing system interfaces and models

@@ -6,7 +6,7 @@ Implements IDataRepository interface for local data persistence
 import sqlite3
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 from pathlib import Path
 
@@ -107,6 +107,114 @@ class SQLiteRepository(IDataRepository):
                         created_at TEXT DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
+                
+                # AWS Pricing SKUs table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS aws_pricing_skus (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        service_code TEXT NOT NULL,
+                        region TEXT NOT NULL,
+                        instance_type TEXT,
+                        product_family TEXT,
+                        sku TEXT UNIQUE NOT NULL,
+                        price_per_unit REAL NOT NULL,
+                        unit TEXT NOT NULL,
+                        currency TEXT DEFAULT 'USD',
+                        price_description TEXT,
+                        attributes TEXT,
+                        last_updated TEXT DEFAULT CURRENT_TIMESTAMP,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                
+                # Pricing cache table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS pricing_cache (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        cache_key TEXT UNIQUE NOT NULL,
+                        data_type TEXT NOT NULL,
+                        cached_data TEXT NOT NULL,
+                        expires_at TEXT NOT NULL,
+                        last_updated TEXT DEFAULT CURRENT_TIMESTAMP,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                
+                # CSV analyses table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS csv_analyses (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        file_hash TEXT UNIQUE NOT NULL,
+                        filename TEXT NOT NULL,
+                        analysis_data TEXT NOT NULL,
+                        charts_data TEXT,
+                        user_queries TEXT,
+                        cost_estimates TEXT,
+                        last_accessed TEXT DEFAULT CURRENT_TIMESTAMP,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                
+                # Forecast data table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS forecast_data (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        resource_type TEXT NOT NULL,
+                        resource_config TEXT NOT NULL,
+                        duration_months INTEGER NOT NULL,
+                        quantity INTEGER NOT NULL,
+                        cost_projection TEXT NOT NULL,
+                        forecast_charts TEXT,
+                        confidence_score REAL DEFAULT 0.8,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                
+                # Agent strand logs table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS agent_strand_logs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        strand_name TEXT NOT NULL,
+                        operation TEXT NOT NULL,
+                        input_data TEXT,
+                        output_data TEXT,
+                        execution_time_ms INTEGER,
+                        status TEXT NOT NULL,
+                        error_message TEXT,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                
+                # Create indexes for performance (with error handling)
+                try:
+                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pricing_skus_service_region ON aws_pricing_skus(service_code, region)")
+                except sqlite3.OperationalError as e:
+                    logger.warning(f"Could not create index idx_pricing_skus_service_region: {e}")
+                
+                try:
+                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pricing_skus_instance_type ON aws_pricing_skus(instance_type)")
+                except sqlite3.OperationalError as e:
+                    logger.warning(f"Could not create index idx_pricing_skus_instance_type: {e}")
+                
+                try:
+                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pricing_cache_key ON pricing_cache(cache_key)")
+                except sqlite3.OperationalError as e:
+                    logger.warning(f"Could not create index idx_pricing_cache_key: {e}")
+                
+                try:
+                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_csv_analyses_hash ON csv_analyses(file_hash)")
+                except sqlite3.OperationalError as e:
+                    logger.warning(f"Could not create index idx_csv_analyses_hash: {e}")
+                
+                try:
+                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_forecast_resource_type ON forecast_data(resource_type)")
+                except sqlite3.OperationalError as e:
+                    logger.warning(f"Could not create index idx_forecast_resource_type: {e}")
+                
+                try:
+                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_agent_logs_strand ON agent_strand_logs(strand_name)")
+                except sqlite3.OperationalError as e:
+                    logger.warning(f"Could not create index idx_agent_logs_strand: {e}")
                 
                 conn.commit()
                 logger.info(f"Database initialized at {self.db_path}")
@@ -432,3 +540,246 @@ class SQLiteRepository(IDataRepository):
         except Exception as e:
             logger.error(f"Error deserializing usage summary: {e}")
             return None
+    
+    # AWS Pricing System Methods
+    
+    def save_pricing_sku(self, service_code: str, region: str, sku_data: dict):
+        """Save AWS pricing SKU data"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    INSERT OR REPLACE INTO aws_pricing_skus 
+                    (service_code, region, instance_type, product_family, sku, 
+                     price_per_unit, unit, currency, price_description, attributes, last_updated)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    service_code,
+                    region,
+                    sku_data.get('instance_type'),
+                    sku_data.get('product_family'),
+                    sku_data['sku'],
+                    sku_data['price_per_unit'],
+                    sku_data['unit'],
+                    sku_data.get('currency', 'USD'),
+                    sku_data.get('price_description'),
+                    json.dumps(sku_data.get('attributes', {})),
+                    datetime.now().isoformat()
+                ))
+                
+                conn.commit()
+                
+        except Exception as e:
+            logger.error(f"Error saving pricing SKU: {e}")
+    
+    def get_pricing_data(self, service_code: str, region: str, instance_type: str = None) -> List[dict]:
+        """Get pricing data for service/region/instance"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                query = """
+                    SELECT * FROM aws_pricing_skus 
+                    WHERE service_code = ? AND region = ?
+                """
+                params = [service_code, region]
+                
+                if instance_type:
+                    query += " AND instance_type = ?"
+                    params.append(instance_type)
+                
+                cursor.execute(query, params)
+                
+                results = []
+                for row in cursor.fetchall():
+                    results.append({
+                        'service_code': row[1],
+                        'region': row[2],
+                        'instance_type': row[3],
+                        'product_family': row[4],
+                        'sku': row[5],
+                        'price_per_unit': row[6],
+                        'unit': row[7],
+                        'currency': row[8],
+                        'price_description': row[9],
+                        'attributes': json.loads(row[10]) if row[10] else {},
+                        'last_updated': row[11]
+                    })
+                
+                return results
+                
+        except Exception as e:
+            logger.error(f"Error getting pricing data: {e}")
+            return []
+    
+    def cache_data(self, cache_key: str, data_type: str, data: dict, ttl_hours: int = 24):
+        """Cache data with TTL"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                expires_at = datetime.now() + timedelta(hours=ttl_hours)
+                
+                cursor.execute("""
+                    INSERT OR REPLACE INTO pricing_cache 
+                    (cache_key, data_type, cached_data, expires_at, last_updated)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (
+                    cache_key,
+                    data_type,
+                    json.dumps(data),
+                    expires_at.isoformat(),
+                    datetime.now().isoformat()
+                ))
+                
+                conn.commit()
+                
+        except Exception as e:
+            logger.error(f"Error caching data: {e}")
+    
+    def get_cached_data(self, cache_key: str) -> Optional[dict]:
+        """Get cached data if not expired"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    SELECT cached_data, expires_at FROM pricing_cache 
+                    WHERE cache_key = ? AND expires_at > ?
+                """, (cache_key, datetime.now().isoformat()))
+                
+                row = cursor.fetchone()
+                if row:
+                    return json.loads(row[0])
+                
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error getting cached data: {e}")
+            return None
+    
+    def save_csv_analysis(self, file_hash: str, filename: str, analysis_data: dict):
+        """Save CSV analysis results"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    INSERT OR REPLACE INTO csv_analyses 
+                    (file_hash, filename, analysis_data, charts_data, user_queries, 
+                     cost_estimates, last_accessed)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    file_hash,
+                    filename,
+                    json.dumps(analysis_data.get('analysis', {})),
+                    json.dumps(analysis_data.get('charts', {})),
+                    json.dumps(analysis_data.get('queries', [])),
+                    json.dumps(analysis_data.get('cost_estimates', {})),
+                    datetime.now().isoformat()
+                ))
+                
+                conn.commit()
+                
+        except Exception as e:
+            logger.error(f"Error saving CSV analysis: {e}")
+    
+    def get_csv_analysis(self, file_hash: str) -> Optional[dict]:
+        """Get CSV analysis by file hash"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    SELECT analysis_data, charts_data, user_queries, cost_estimates 
+                    FROM csv_analyses WHERE file_hash = ?
+                """, (file_hash,))
+                
+                row = cursor.fetchone()
+                if row:
+                    return {
+                        'analysis': json.loads(row[0]) if row[0] else {},
+                        'charts': json.loads(row[1]) if row[1] else {},
+                        'queries': json.loads(row[2]) if row[2] else [],
+                        'cost_estimates': json.loads(row[3]) if row[3] else {}
+                    }
+                
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error getting CSV analysis: {e}")
+            return None
+    
+    def save_forecast_data(self, resource_type: str, config: dict, forecast_result: dict):
+        """Save forecast calculation results"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    INSERT INTO forecast_data 
+                    (resource_type, resource_config, duration_months, quantity, 
+                     cost_projection, forecast_charts, confidence_score)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    resource_type,
+                    json.dumps(config),
+                    config.get('duration_months', 12),
+                    config.get('quantity', 1),
+                    json.dumps(forecast_result.get('projection', {})),
+                    json.dumps(forecast_result.get('charts', {})),
+                    forecast_result.get('confidence_score', 0.8)
+                ))
+                
+                conn.commit()
+                
+        except Exception as e:
+            logger.error(f"Error saving forecast data: {e}")
+    
+    def log_agent_operation(self, strand_name: str, operation: str, input_data: dict, 
+                           output_data: dict, execution_time_ms: int, status: str, 
+                           error_message: str = None):
+        """Log agent strand operations"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    INSERT INTO agent_strand_logs 
+                    (strand_name, operation, input_data, output_data, execution_time_ms, 
+                     status, error_message)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    strand_name,
+                    operation,
+                    json.dumps(input_data) if input_data else None,
+                    json.dumps(output_data) if output_data else None,
+                    execution_time_ms,
+                    status,
+                    error_message
+                ))
+                
+                conn.commit()
+                
+        except Exception as e:
+            logger.error(f"Error logging agent operation: {e}")
+    
+    def cleanup_expired_cache(self):
+        """Clean up expired cache entries"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    DELETE FROM pricing_cache 
+                    WHERE expires_at < ?
+                """, (datetime.now().isoformat(),))
+                
+                deleted_count = cursor.rowcount
+                conn.commit()
+                
+                logger.info(f"Cleaned up {deleted_count} expired cache entries")
+                
+        except Exception as e:
+            logger.error(f"Error cleaning up cache: {e}")

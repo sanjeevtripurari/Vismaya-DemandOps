@@ -351,19 +351,68 @@ class AuthenticatedDashboard:
         """Render resource monitoring tab"""
         st.markdown("### 🔧 Resource Monitoring")
         
-        # Placeholder for resource monitoring
-        st.info("Resource monitoring dashboard - showing AWS resources, utilization, and optimization opportunities.")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric("EC2 Instances", "0", delta="No instances")
-        
-        with col2:
-            st.metric("Storage Volumes", "0", delta="No volumes")
-        
-        with col3:
-            st.metric("RDS Instances", "0", delta="No databases")
+        # Get real usage data
+        try:
+            # Get usage summary from container
+            usage_summary_use_case = self.container._services.get('usage_summary_use_case')
+            if usage_summary_use_case:
+                import asyncio
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    usage_summary = loop.run_until_complete(usage_summary_use_case.execute())
+                    
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        ec2_count = len(usage_summary.ec2_instances) if usage_summary.ec2_instances else 0
+                        st.metric("EC2 Instances", str(ec2_count), 
+                                delta=f"{ec2_count} running" if ec2_count > 0 else "No instances")
+                    
+                    with col2:
+                        storage_count = len(usage_summary.storage_volumes) if usage_summary.storage_volumes else 0
+                        st.metric("Storage Volumes", str(storage_count),
+                                delta=f"{storage_count} volumes" if storage_count > 0 else "No volumes")
+                    
+                    with col3:
+                        rds_count = len(usage_summary.database_instances) if usage_summary.database_instances else 0
+                        st.metric("RDS Instances", str(rds_count),
+                                delta=f"{rds_count} databases" if rds_count > 0 else "No databases")
+                    
+                    # Show resource details
+                    if ec2_count > 0 or storage_count > 0 or rds_count > 0:
+                        st.success(f"✅ Real usage detected: {ec2_count} EC2 instances, {storage_count} storage volumes, {rds_count} databases")
+                    else:
+                        st.info("No active resources detected")
+                        
+                finally:
+                    loop.close()
+            else:
+                # Fallback to hardcoded values
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric("EC2 Instances", "0", delta="No instances")
+                
+                with col2:
+                    st.metric("Storage Volumes", "0", delta="No volumes")
+                
+                with col3:
+                    st.metric("RDS Instances", "0", delta="No databases")
+                    
+        except Exception as e:
+            st.error(f"Error loading resource data: {e}")
+            # Fallback to hardcoded values
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric("EC2 Instances", "0", delta="No instances")
+            
+            with col2:
+                st.metric("Storage Volumes", "0", delta="No volumes")
+            
+            with col3:
+                st.metric("RDS Instances", "0", delta="No databases")
     
     def _render_technical_metrics_tab(self) -> None:
         """Render technical metrics tab"""

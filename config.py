@@ -36,6 +36,10 @@ class Config:
     BUDGET_WARNING_LIMIT = int(os.getenv('BUDGET_WARNING_LIMIT', 80))  # Warning at $80
     BUDGET_MAXIMUM_LIMIT = int(os.getenv('BUDGET_MAXIMUM_LIMIT', 100))  # Hard limit at $100
     
+    # Cost Explorer Configuration
+    DISABLE_COST_EXPLORER = os.getenv('DISABLE_COST_EXPLORER', 'True').lower() == 'true'
+    USE_REALISTIC_DEMO_DATA = os.getenv('USE_REALISTIC_DEMO_DATA', 'True').lower() == 'true'
+    
     @classmethod
     def is_production(cls):
         return cls.ENVIRONMENT.lower() == 'production'

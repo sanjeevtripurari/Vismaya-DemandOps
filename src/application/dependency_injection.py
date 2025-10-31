@@ -24,6 +24,7 @@ from ..services.resource_service import ResourceManagementService
 from ..services.query_parser import NaturalLanguageQueryParser
 from ..services.cost_estimation_engine import CostEstimationEngine
 from ..services.forecasting_ai_assistant import ForecastingAIAssistant
+from ..services.tabular_data_service import TabularDataService
 from .use_cases import (
     GetUsageSummaryUseCase, AnalyzeScenarioUseCase, 
     GetCostInsightsUseCase, HandleChatUseCase, GetResourceDetailsUseCase
@@ -166,8 +167,14 @@ class DependencyContainer:
             # Data repository
             self._services['data_repository'] = SQLiteRepository()
             
-            # Data providers
-            self._services['cost_provider'] = AWSCostProvider(aws_session, self._config)
+            # Data providers - choose based on configuration
+            if getattr(self._config, 'DISABLE_COST_EXPLORER', True):
+                logger.info("🔍 Using Real Usage Analyzer (Cost Explorer disabled)")
+                from ..infrastructure.real_usage_analyzer import RealUsageAnalyzer
+                self._services['cost_provider'] = RealUsageAnalyzer(aws_session, self._config)
+            else:
+                logger.info("📊 Using AWS Cost Explorer API")
+                self._services['cost_provider'] = AWSCostProvider(aws_session, self._config)
             self._services['resource_provider'] = AWSResourceProvider(aws_session)
             self._services['forecasting_service'] = SimpleForecastingService()
             self._services['ai_assistant'] = BedrockAIAssistant(
@@ -191,6 +198,9 @@ class DependencyContainer:
                 self._services['cost_estimation_engine'],
                 self._services['ai_assistant']
             )
+            
+            # Tabular data services
+            self._services['tabular_data_service'] = TabularDataService()
             
             # Application services
             self._services['cost_service'] = CostAnalysisService(

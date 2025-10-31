@@ -13,6 +13,7 @@ from .decision_tracking import DecisionTrackingInterface
 from .conversational_ai import ConversationalAIInterface
 from ..application.dependency_injection import DependencyContainer
 from ..core.models import UsageSummary, BudgetInfo
+from ..services.tabular_data_service import TabularDataService
 from config import Config
 
 
@@ -24,6 +25,8 @@ class EnhancedDashboard:
         self.modern_dashboard = ModernDashboardFramework()
         self.decision_tracker = DecisionTrackingInterface()
         self.conversational_ai = ConversationalAIInterface(container)
+        self.tabular_service = TabularDataService()
+        self.data_collector = None  # Will be initialized when needed
         self._initialize_dashboard_state()
     
     def _initialize_dashboard_state(self):
@@ -135,6 +138,7 @@ class EnhancedDashboard:
         # Main navigation tabs
         nav_options = {
             'overview': {'label': '📊 Overview', 'icon': '📊'},
+            'tabular': {'label': '📋 Tabular View', 'icon': '📋'},
             'decisions': {'label': '⚖️ Decisions', 'icon': '⚖️'},
             'analytics': {'label': '📈 Analytics', 'icon': '📈'},
             'forecasting': {'label': '🔮 Forecasting', 'icon': '🔮'},
@@ -168,6 +172,8 @@ class EnhancedDashboard:
         
         if mode == 'overview':
             self._render_overview_dashboard()
+        elif mode == 'tabular':
+            self._render_tabular_dashboard()
         elif mode == 'decisions':
             self._render_decisions_dashboard()
         elif mode == 'analytics':
@@ -296,6 +302,136 @@ class EnhancedDashboard:
         # Optimization tracking
         self._render_optimization_tracking()
     
+    def _render_tabular_dashboard(self):
+        """Render comprehensive tabular dashboard with all data"""
+        st.markdown("### 📋 Comprehensive Tabular View")
+        st.markdown("*All AWS resources, costs, and forecasting data in detailed tables*")
+        
+        # Data refresh controls
+        col1, col2, col3 = st.columns([2, 1, 1])
+        
+        with col1:
+            st.markdown("**📊 Real-time data from your AWS account stored in SQLite database**")
+        
+        with col2:
+            if st.button("🔄 Refresh Data", help="Collect latest data from AWS and update tables"):
+                with st.spinner("Collecting comprehensive data from AWS..."):
+                    self._refresh_tabular_data()
+        
+        with col3:
+            auto_refresh = st.toggle("🔄 Auto-refresh", help="Automatically refresh data every 5 minutes")
+        
+        # Tabular view tabs
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "📊 Current Usage", 
+            "🔮 Forecasting", 
+            "💰 Billing Breakdown", 
+            "📈 Cost Summary"
+        ])
+        
+        with tab1:
+            st.markdown("#### 📊 Current AWS Resources & Costs")
+            self.tabular_service.render_tabular_display("current")
+        
+        with tab2:
+            st.markdown("#### 🔮 Forecasting Analysis Results")
+            self.tabular_service.render_tabular_display("forecast")
+        
+        with tab3:
+            st.markdown("#### 💰 Detailed Billing Breakdown")
+            self.tabular_service.render_tabular_display("billing")
+        
+        with tab4:
+            st.markdown("#### 📈 Cost Summary by Category")
+            self.tabular_service.render_tabular_display("summary")
+        
+        # Export options
+        st.markdown("---")
+        st.markdown("### 📤 Export Options")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            if st.button("📊 Export Current Usage", help="Export current usage data as CSV"):
+                self._export_table_data("current")
+        
+        with col2:
+            if st.button("🔮 Export Forecasting", help="Export forecasting data as CSV"):
+                self._export_table_data("forecast")
+        
+        with col3:
+            if st.button("💰 Export Billing", help="Export billing breakdown as CSV"):
+                self._export_table_data("billing")
+        
+        with col4:
+            if st.button("📈 Export Summary", help="Export cost summary as CSV"):
+                self._export_table_data("summary")
+    
+    def _refresh_tabular_data(self):
+        """Refresh all tabular data from AWS"""
+        try:
+            if not self.data_collector:
+                # Initialize data collector (import here to avoid circular imports)
+                from ..services.enhanced_data_collector import EnhancedDataCollector
+                aws_session = self.container._services.get('session_factory').create_session()
+                self.data_collector = EnhancedDataCollector(aws_session, Config)
+            
+            # Collect and store current usage data
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            try:
+                result = loop.run_until_complete(self.data_collector.collect_and_store_current_usage())
+                
+                st.success(f"✅ Data refreshed successfully!")
+                st.info(f"📊 Collected {result['total_resources']} resources with total cost ${result['total_cost']:.2f}")
+                
+                # Update session state
+                st.session_state.last_data_refresh = datetime.now()
+                
+            finally:
+                loop.close()
+                
+        except Exception as e:
+            st.error(f"❌ Failed to refresh data: {e}")
+            logger.error(f"Data refresh failed: {e}")
+    
+    def _export_table_data(self, table_type: str):
+        """Export table data as CSV"""
+        try:
+            if table_type == "current":
+                df = self.tabular_service.get_current_resources_table()
+                filename = f"current_usage_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            elif table_type == "forecast":
+                df = self.tabular_service.get_forecasting_table()
+                filename = f"forecasting_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            elif table_type == "billing":
+                df = self.tabular_service.get_billing_breakdown_table()
+                filename = f"billing_breakdown_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            elif table_type == "summary":
+                df = self.tabular_service.get_cost_summary_table()
+                filename = f"cost_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            else:
+                st.error("Invalid table type")
+                return
+            
+            if not df.empty:
+                csv = df.to_csv(index=False)
+                st.download_button(
+                    label=f"📥 Download {table_type.title()} Data",
+                    data=csv,
+                    file_name=filename,
+                    mime="text/csv",
+                    key=f"download_{table_type}_{datetime.now().timestamp()}"
+                )
+                st.success(f"✅ {table_type.title()} data ready for download!")
+            else:
+                st.warning(f"No {table_type} data available to export")
+                
+        except Exception as e:
+            st.error(f"❌ Failed to export {table_type} data: {e}")
+
     def _render_settings_dashboard(self):
         """Render settings dashboard"""
         st.markdown("### ⚙️ Dashboard Settings")
