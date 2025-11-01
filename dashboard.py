@@ -22,9 +22,18 @@ def main():
         from src.ui.enhanced_dashboard import EnhancedDashboard
         from src.application.dependency_injection import DependencyContainer
         
+        st.info("🔄 Initializing Vismaya Dashboard...")
+        
         # Initialize container
         container = DependencyContainer(Config)
-        container.initialize()
+        
+        try:
+            container.initialize()
+            st.success("✅ Container initialized successfully")
+        except Exception as e:
+            st.error(f"❌ Container initialization failed: {e}")
+            st.warning("🔄 Running in demo mode with mock data")
+            container = None
         
         # Create enhanced dashboard with advanced forecasting
         dashboard = EnhancedDashboard(container)
@@ -36,8 +45,10 @@ def main():
         dashboard.render_enhanced_dashboard()
         
     except Exception as e:
-        st.error(f"Error initializing dashboard: {e}")
+        st.error(f"❌ Error initializing dashboard: {e}")
         st.info("Please check your configuration and try again.")
+        import traceback
+        st.error(f"Full error: {traceback.format_exc()}")
 
 def render_advanced_forecasting_dashboard(dashboard):
     """Advanced forecasting dashboard with proper AI assistant"""
