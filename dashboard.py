@@ -35,11 +35,8 @@ def main():
             st.warning("🔄 Running in demo mode with mock data")
             container = None
         
-        # Create enhanced dashboard with advanced forecasting
+        # Create enhanced dashboard
         dashboard = EnhancedDashboard(container)
-        
-        # Override the forecasting dashboard to use advanced AI
-        dashboard._render_forecasting_dashboard = lambda: render_advanced_forecasting_dashboard(dashboard)
         
         # Run the enhanced dashboard
         dashboard.render_enhanced_dashboard()
