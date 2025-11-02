@@ -2,7 +2,9 @@
 
 ## 🚀 **Overview**
 
-Vismaya DemandOps is a comprehensive AI-powered Financial Operations (FinOps) platform designed to provide intelligent AWS cost management, forecasting, and optimization. Built with modern architecture principles, it offers real-time cost analysis, natural language query processing, and detailed resource tracking without relying on expensive AWS Cost Explorer APIs.
+Vismaya DemandOps is a comprehensive AI-powered Financial Operations (FinOps) platform designed to provide intelligent AWS cost management, forecasting, and optimization. Built with modern architecture principles, it offers real-time cost analysis, natural language query processing, detailed resource tracking, and advanced decision workflows with email template generation for team collaboration.
+
+> **📌 Current Branch**: This documentation reflects the latest features available in the `AgenticAI-v2-dev` branch, which includes enhanced budget management, CSV processing workflows, and email template generation systems.
 
 ## 🎯 **Key Features**
 
@@ -11,23 +13,34 @@ Vismaya DemandOps is a comprehensive AI-powered Financial Operations (FinOps) pl
 - **Serverless Service Tracking:** Monitors Bedrock AI, Lambda, S3, VPC, and other serverless costs
 - **Zero-Cost Filtering:** Displays only services with actual costs for clarity
 - **Multi-Service Categorization:** Organizes costs by Compute, Storage, Network, AI/ML, Database, Management
+- **Budget Integration:** Real-time budget monitoring with .env configuration support
 
-### **🤖 AI-Powered Forecasting**
+### **🤖 AI-Powered Forecasting with Agentic Framework**
 - **Natural Language Queries:** "Need 2 EC2 large instances with 20GB storage and 1 elastic IP"
 - **Complex Resource Planning:** Multi-resource cost estimation with detailed breakdowns
 - **Real-Time Pricing:** Integrates with AWS Pricing API for accurate calculations
-- **Intelligent Recommendations:** AI-generated optimization suggestions
+- **Agentic AI Cost Estimation:** Advanced AI agents for intelligent cost analysis
+- **Intelligent Recommendations:** AI-generated optimization suggestions with confidence levels
 
-### **📊 Comprehensive Tabular Views**
+### **📊 Enhanced CSV Processing & Decision Workflows**
+- **CSV Upload & Processing:** Upload resource plans for accurate cost estimation
+- **Approval Workflows:** Four-button approval system (Approve Original, Approve Optimized, Review Required, Reject)
+- **Email Template Generation:** Automated email templates for FinOps, DevOps, and CTO teams
+- **Budget Compliance Checking:** Validates resource plans against .env budget limits
+- **Optimization Recommendations:** AI-powered cost optimization with budget impact analysis
+
+### **📋 Comprehensive Tabular Views**
 - **Current Usage:** Real-time service inventory with costs and metadata
 - **Forecasting Results:** Detailed cost projections with export capabilities
 - **Billing Breakdown:** Service-level cost attribution with tax calculations
 - **Cost Summary:** Categorized totals with trend analysis
+- **Enhanced Data Collection:** Zero-cost filtering with service categorization
 
-### **🔍 Advanced Analytics**
-- **Budget Monitoring:** Real-time budget utilization tracking
+### **🔍 Advanced Analytics & Budget Management**
+- **Budget Monitoring Widget:** Real-time budget status with progress bars and alerts
+- **Budget-Based Recommendations:** Cost optimization suggestions based on budget constraints
 - **Trend Analysis:** Historical cost patterns and growth projections
-- **Decision Tracking:** Cost optimization decision workflows
+- **Decision Tracking:** Cost optimization decision workflows with team notifications
 - **Performance Metrics:** System efficiency and cost optimization scores
 
 ---
@@ -66,12 +79,27 @@ Vismaya DemandOps is a comprehensive AI-powered Financial Operations (FinOps) pl
 - Python 3.8+
 - AWS Account with appropriate permissions
 - AWS CLI configured or SSO setup
+- Git (for cloning the repository)
+
+### **⚡ Fast Setup**
+```bash
+# Quick setup for AgenticAI-v2-dev branch
+git clone https://github.com/sanjeevtripurari/Vismaya-DemandOps.git
+cd Vismaya-DemandOps
+git checkout AgenticAI-v2-dev
+python -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+streamlit run dashboard.py
+```
 
 ### **Installation**
 ```bash
 # Clone the repository
-git clone <repository-url>
-cd vismaya-demandops
+git clone https://github.com/sanjeevtripurari/Vismaya-DemandOps.git
+cd Vismaya-DemandOps
+
+# Checkout the AgenticAI-v2-dev branch
+git checkout AgenticAI-v2-dev
 
 # Setup virtual environment
 python -m venv venv
@@ -90,12 +118,36 @@ streamlit run dashboard.py
 ### **Configuration**
 Create `.env` file with your settings:
 ```env
+# AWS Configuration
 AWS_REGION=us-east-2
 AWS_PROFILE=default
+SSO_START_URL=https://superopsglobalhackathon.awsapps.com/start/#
+SSO_REGION=us-east-2
+SSO_ACCOUNT_ID=559928724862
+SSO_ROLE_NAME=AdministratorAccess
+AWS_USER_EMAIL=your-email@domain.com
+
+# Bedrock AI Configuration
 BEDROCK_MODEL_ID=anthropic.claude-3-sonnet-20240229-v1:0
-DEFAULT_BUDGET=80
+BEDROCK_FALLBACK_MODEL_ID=anthropic.claude-3-haiku-20240307-v1:0
+BEDROCK_MAX_TOKENS=1000
+BEDROCK_TEMPERATURE=0.1
+
+# Budget Configuration (Enhanced)
+DEFAULT_BUDGET=80                     # Warning threshold ($)
+BUDGET_WARNING_LIMIT=80              # Warning at $80
+BUDGET_MAXIMUM_LIMIT=100             # Hard limit at $100
+
+# Application Configuration
+DEBUG=True
+PORT=8501
+ENVIRONMENT=development
 DISABLE_COST_EXPLORER=True
 USE_REALISTIC_DEMO_DATA=True
+
+# Agentic AI Configuration
+ENABLE_AGENTIC_SYSTEM=True           # Enable agentic AI framework
+AGENT_STRAND_TIMEOUT=30              # Agent strand timeout (seconds)
 ```
 
 ---
@@ -103,14 +155,17 @@ USE_REALISTIC_DEMO_DATA=True
 ## 📱 **Usage Guide**
 
 ### **Dashboard Navigation**
-1. **📊 Overview:** Current spending, budget status, key metrics
-2. **📋 Tabular View:** Comprehensive service tables with export options
-3. **🔮 Forecasting:** AI-powered cost estimation with natural language queries
-4. **⚖️ Decisions:** Cost optimization decision tracking
-5. **📈 Analytics:** Advanced cost analytics and trend analysis
-6. **⚡ Optimization:** Cost savings recommendations and implementation tracking
+1. **📊 Overview:** Current spending, budget status, key metrics with budget monitoring widget
+2. **�  Current Usage:** Real-time AWS resource usage with detailed billing and AI assistant
+3. **⚖️ Decisions:** Resource planning with CSV upload, approval workflows, and email templates
+4. **📈 Analytics:** Advanced cost analytics and trend analysis
+5. **� Foreycasting:** AI-powered cost estimation with natural language queries
+6. **⚡ Optimization:** Budget-based cost savings recommendations and implementation tracking
+7. **⚙️ Settings:** System configuration, appearance, and notification preferences
 
-### **Example Queries**
+### **Example Usage Scenarios**
+
+#### **Natural Language Queries**
 ```
 Simple Queries:
 • "Cost of 1 t3.large EC2 for 3 months"
@@ -122,6 +177,22 @@ Complex Queries:
 • "Cost for 2 EC2 large instances with 30 GB storage for 2 months, and 3 postgres databases"
 • "Compare costs: 3 m5.large vs 6 t3.medium instances for development"
 ```
+
+#### **CSV Resource Planning**
+Upload CSV files with resource specifications:
+```csv
+Resource Type,Quantity / Size,Description or Use Case,Duration (if temporary)
+Compute (EC2),12 instances (m6i.large),Application servers for API backend,3 months
+Database (RDS / Aurora),1 x db.r6g.large,Main PostgreSQL DB,2 months
+Storage (S3 / EFS / FSx),10 TB x 1 TB EFS,Object & file storage,4 months
+Networking (NLB / Load Balancer),2 NLBs 1 ALB,For microservices orchestration,2 months
+```
+
+#### **Approval Workflow**
+- **Approve Original Plan:** Generate approval emails for all teams
+- **Approve Optimized Plan:** Generate emails with cost optimization details
+- **Review Required:** Generate review request emails with analysis requirements
+- **Reject Plan:** Generate rejection emails with budget constraint explanations
 
 ---
 
@@ -448,8 +519,9 @@ statsd.gauge('aws.budget.utilization', budget_percentage)
 ### **Development Setup**
 ```bash
 # Clone and setup development environment
-git clone <repository-url>
-cd vismaya-demandops
+git clone https://github.com/sanjeevtripurari/Vismaya-DemandOps.git
+cd Vismaya-DemandOps
+git checkout AgenticAI-v2-dev
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements-dev.txt
@@ -464,12 +536,12 @@ python verify_real_usage_system.py
 ```
 
 ### **Integration Development**
-1. **Fork the repository**
-2. **Create integration branch:** `git checkout -b integration/superops`
+1. **Fork the repository** from https://github.com/sanjeevtripurari/Vismaya-DemandOps
+2. **Create integration branch:** `git checkout -b integration/superops` (from AgenticAI-v2-dev)
 3. **Implement integration module** in `src/integrations/`
 4. **Add configuration** in `config/integrations/`
 5. **Write tests** in `tests/integrations/`
-6. **Submit pull request**
+6. **Submit pull request** to the AgenticAI-v2-dev branch
 
 ---
 
@@ -502,7 +574,14 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## 🎯 **Roadmap**
 
-### **Upcoming Features**
+### **✅ Current Branch Features (AgenticAI-v2-dev)**
+- **Enhanced Budget Management:** Real-time monitoring with .env configuration
+- **CSV Processing Workflows:** Upload, validate, and approve resource plans
+- **Email Template Generation:** Automated team notifications for approvals
+- **Agentic AI Integration:** Advanced cost estimation with fallback systems
+- **Budget Compliance:** Automatic validation against configured limits
+
+### **🔄 Upcoming Features**
 - **REST API:** Complete API for third-party integrations
 - **Multi-Cloud Support:** Azure and GCP cost analysis
 - **Advanced ML:** Predictive cost modeling and anomaly detection
@@ -516,4 +595,41 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 4. **Terraform Integration:** Infrastructure cost planning
 5. **Kubernetes Integration:** Container cost allocation
 
-Vismaya DemandOps provides a comprehensive, AI-powered solution for AWS cost management that can be easily integrated into existing DevOps and FinOps workflows, making it an ideal choice for organizations looking to optimize their cloud spending with intelligent automation and detailed visibility.
+---
+
+## 🎯 **Current Implementation Status**
+
+### **✅ Completed Features (AgenticAI-v2-dev Branch)**
+- **Enhanced Budget Management**: Real-time budget monitoring with .env configuration
+- **CSV Resource Planning**: Upload and process resource plans with accurate AWS pricing
+- **Approval Workflows**: Four-button approval system with status tracking
+- **Email Template Generation**: Automated templates for FinOps, DevOps, and CTO teams
+- **Agentic AI Cost Estimation**: Advanced AI-powered cost calculation with fallback
+- **Budget Compliance Checking**: Validates resource plans against budget limits
+- **Real AWS Pricing Integration**: Accurate cost calculations for all major AWS services
+- **Budget-Based Recommendations**: Context-aware optimization suggestions
+
+> **🔗 Repository**: https://github.com/sanjeevtripurari/Vismaya-DemandOps  
+> **📋 Branch**: AgenticAI-v2-dev (latest features)  
+> **🚀 Status**: Production Ready
+
+### **🔧 Technical Enhancements**
+- **Debug Text Removal**: Clean, production-ready cost calculation output
+- **Enhanced Error Handling**: Graceful fallbacks and user-friendly error messages
+- **Budget Widget**: Real-time budget status with progress bars and alerts
+- **Cost Calculation Accuracy**: Handles complex resource specifications like "12 instances (m6i.large)"
+- **Multi-Resource Support**: EC2, RDS, EFS, Load Balancers, Containers, Lambda, and more
+
+### **📧 Email Template System**
+- **Dynamic Content**: Templates adapt based on approval status (approved/review/rejected)
+- **Team-Specific Messaging**: Tailored content for different stakeholder groups
+- **Budget Impact Analysis**: Detailed financial impact and recommendations
+- **Action-Oriented**: Clear next steps and decision points for each team
+
+### **💰 Budget Integration**
+- **Environment Configuration**: Budget limits configurable via .env file
+- **Real-Time Monitoring**: Live budget utilization tracking and alerts
+- **Compliance Validation**: Automatic checking of resource plans against budget
+- **Threshold Management**: Warning and critical alerts at configurable limits
+
+Vismaya DemandOps provides a comprehensive, AI-powered solution for AWS cost management with advanced budget management, approval workflows, and team collaboration features, making it an ideal choice for organizations looking to optimize their cloud spending with intelligent automation, detailed visibility, and structured decision-making processes.

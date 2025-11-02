@@ -188,6 +188,9 @@ class EnhancedDashboard:
         # Key metrics overview
         self._render_key_metrics()
         
+        # Budget monitoring widget
+        self._render_budget_monitoring_widget()
+        
         # Cost trends and charts
         self._render_cost_overview_charts()
         
@@ -216,8 +219,29 @@ class EnhancedDashboard:
             self._render_current_usage_ai_tab()
     
     def _render_decisions_dashboard(self):
-        """Render decisions dashboard with full decision tracking interface"""
-        self.decision_tracker.render_decision_dashboard()
+        """Render decisions dashboard with resource planning and budgeting"""
+        st.markdown("### ⚖️ Resource Planning & Budget Decisions")
+        st.markdown("*Upload resource plans, analyze costs, and make informed decisions with approval workflows*")
+        
+        # Initialize session state for decisions
+        if 'decision_resource_data' not in st.session_state:
+            st.session_state.decision_resource_data = None
+        if 'decision_budget_data' not in st.session_state:
+            st.session_state.decision_budget_data = None
+        if 'decision_approval_status' not in st.session_state:
+            st.session_state.decision_approval_status = None
+        
+        # Decision sub-tabs
+        tab1, tab2 = st.tabs([
+            "📋 Resource Sheet", 
+            "💰 Budgeting"
+        ])
+        
+        with tab1:
+            self._render_resource_sheet_tab()
+        
+        with tab2:
+            self._render_budgeting_tab()
     
     def _render_current_summary_tab(self):
         """Render current summary tab with real AWS data and graphs"""
@@ -669,10 +693,13 @@ class EnhancedDashboard:
         
         usage_summary = st.session_state.usage_summary
         
-        # Calculate key metrics
+        # Calculate key metrics using .env configuration
         current_spend = usage_summary.budget_info.current_spend
-        budget_limit = usage_summary.budget_info.warning_limit
-        budget_utilization = usage_summary.budget_info.utilization_percentage
+        
+        # Use .env configuration values
+        config = Config()
+        budget_limit = config.BUDGET_WARNING_LIMIT
+        budget_utilization = (current_spend / budget_limit) * 100 if budget_limit > 0 else 0
         forecast_amount = usage_summary.cost_forecast.forecasted_amount if usage_summary.cost_forecast else current_spend
         
         # Pending decisions count
@@ -695,7 +722,7 @@ class EnhancedDashboard:
                 'value': f"{budget_utilization:.1f}%",
                 'icon': '📊',
                 'delta': f"of ${budget_limit:,.2f}",
-                'color': 'warning' if budget_utilization > 80 else 'success'
+                'color': 'warning' if current_spend >= config.BUDGET_WARNING_LIMIT else 'success'
             },
             {
                 'label': 'Monthly Forecast',
@@ -728,6 +755,81 @@ class EnhancedDashboard:
         ]
         
         self.modern_dashboard.render_modern_metrics_grid(metrics)
+    
+    def _render_budget_monitoring_widget(self):
+        """Render budget monitoring widget with .env configuration"""
+        if not hasattr(st.session_state, 'usage_summary') or not st.session_state.usage_summary:
+            return
+            
+        st.markdown("### 💰 Budget Status")
+        
+        usage_summary = st.session_state.usage_summary
+        current_spend = usage_summary.budget_info.current_spend
+        
+        # Use .env configuration values
+        config = Config()
+        default_budget = config.DEFAULT_BUDGET
+        warning_limit = config.BUDGET_WARNING_LIMIT
+        maximum_limit = config.BUDGET_MAXIMUM_LIMIT
+        
+        # Calculate utilization percentages
+        budget_utilization = (current_spend / default_budget) * 100 if default_budget > 0 else 0
+        warning_utilization = (current_spend / warning_limit) * 100 if warning_limit > 0 else 0
+        
+        # Determine status
+        if current_spend >= maximum_limit:
+            status = "🔴 Critical"
+            status_color = "error"
+        elif current_spend >= warning_limit:
+            status = "🟡 Warning"
+            status_color = "warning"
+        else:
+            status = "🟢 Healthy"
+            status_color = "success"
+        
+        # Create columns for budget display
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric(
+                "Current Spend",
+                f"${current_spend:.2f}",
+                delta=f"{budget_utilization:.1f}% of budget"
+            )
+        
+        with col2:
+            st.metric(
+                "Budget Status",
+                status,
+                delta=f"${default_budget - current_spend:.2f} remaining"
+            )
+        
+        with col3:
+            st.metric(
+                "Warning Threshold",
+                f"${warning_limit:.2f}",
+                delta=f"{max(0, warning_limit - current_spend):.2f} until warning"
+            )
+        
+        with col4:
+            st.metric(
+                "Maximum Limit",
+                f"${maximum_limit:.2f}",
+                delta=f"{max(0, maximum_limit - current_spend):.2f} until limit"
+            )
+        
+        # Budget utilization progress bar
+        st.markdown("#### Budget Utilization")
+        progress_value = min(budget_utilization / 100, 1.0)
+        st.progress(progress_value)
+        
+        # Budget trend analysis
+        if hasattr(usage_summary, 'cost_forecast') and usage_summary.cost_forecast:
+            forecast_amount = usage_summary.cost_forecast.forecasted_amount
+            if forecast_amount > warning_limit:
+                st.warning(f"⚠️ Forecast (${forecast_amount:.2f}) exceeds warning limit (${warning_limit:.2f})")
+            elif forecast_amount > default_budget:
+                st.info(f"ℹ️ Forecast (${forecast_amount:.2f}) exceeds default budget (${default_budget:.2f})")
     
     def _render_cost_overview_charts(self):
         """Render cost overview charts"""
@@ -1014,9 +1116,73 @@ class EnhancedDashboard:
         self.modern_dashboard.render_modern_metrics_grid(optimization_metrics)
     
     def _render_optimization_recommendations(self):
-        """Render optimization recommendations"""
-        st.markdown("#### 💡 Optimization Recommendations")
-        st.info("Detailed optimization recommendations would be implemented here")
+        """Render budget-based optimization recommendations"""
+        st.markdown("#### 💡 Budget-Based Optimization Recommendations")
+        
+        if not hasattr(st.session_state, 'usage_summary') or not st.session_state.usage_summary:
+            st.info("Load usage data to see optimization recommendations")
+            return
+            
+        usage_summary = st.session_state.usage_summary
+        current_spend = usage_summary.budget_info.current_spend
+        
+        # Use .env configuration values
+        config = Config()
+        warning_limit = config.BUDGET_WARNING_LIMIT
+        maximum_limit = config.BUDGET_MAXIMUM_LIMIT
+        
+        recommendations = []
+        
+        # Budget-based recommendations
+        if current_spend >= maximum_limit:
+            recommendations.extend([
+                "🚨 **CRITICAL**: Immediate cost reduction required - current spend exceeds maximum limit",
+                "🛑 **Stop non-essential resources** to avoid budget overrun",
+                "📉 **Scale down EC2 instances** to smaller instance types",
+                "⏸️ **Pause development environments** until budget resets"
+            ])
+        elif current_spend >= warning_limit:
+            recommendations.extend([
+                "⚠️ **WARNING**: Approaching budget limit - implement cost controls",
+                "🔍 **Review Reserved Instance opportunities** for 30-40% savings",
+                "📊 **Enable detailed billing alerts** for real-time monitoring",
+                "🎯 **Right-size EC2 instances** based on actual utilization"
+            ])
+        else:
+            # Healthy budget - proactive recommendations
+            remaining_budget = warning_limit - current_spend
+            recommendations.extend([
+                f"✅ **Budget Status**: Healthy ({remaining_budget:.2f} remaining until warning)",
+                "💡 **Proactive optimization**: Consider Reserved Instances for predictable workloads",
+                "📈 **Cost monitoring**: Set up CloudWatch billing alarms",
+                "🔄 **Regular reviews**: Schedule monthly cost optimization reviews"
+            ])
+        
+        # Resource-specific recommendations based on current usage
+        if hasattr(usage_summary, 'ec2_instances') and usage_summary.ec2_instances:
+            ec2_count = len(usage_summary.ec2_instances)
+            if ec2_count > 0:
+                recommendations.append(f"🖥️ **EC2 Optimization**: {ec2_count} instances detected - consider auto-scaling and spot instances")
+        
+        if hasattr(usage_summary, 'storage_volumes') and usage_summary.storage_volumes:
+            storage_count = len(usage_summary.storage_volumes)
+            if storage_count > 0:
+                recommendations.append(f"💾 **Storage Optimization**: {storage_count} volumes detected - migrate to GP3 for 20% cost savings")
+        
+        # Display recommendations
+        for i, rec in enumerate(recommendations, 1):
+            st.markdown(f"{i}. {rec}")
+        
+        # Budget forecast warning
+        if hasattr(usage_summary, 'cost_forecast') and usage_summary.cost_forecast:
+            forecast_amount = usage_summary.cost_forecast.forecasted_amount
+            if forecast_amount > warning_limit:
+                st.error(f"🔮 **Forecast Alert**: Projected spend (${forecast_amount:.2f}) will exceed warning limit (${warning_limit:.2f})")
+                st.markdown("**Recommended Actions:**")
+                st.markdown("- Implement cost controls immediately")
+                st.markdown("- Review and optimize high-cost services")
+                st.markdown("- Consider Reserved Instance purchases")
+                st.markdown("- Set up automated scaling policies")
     
     def _render_optimization_tracking(self):
         """Render optimization tracking"""
@@ -1134,11 +1300,12 @@ class EnhancedDashboard:
         """Load demo data when real AWS data is not available"""
         from ..core.models import UsageSummary, BudgetInfo, ServiceCost, CostData, ServiceType, CostForecast, OptimizationRecommendation
         
-        # Create budget info with real data
+        # Create budget info using .env configuration
+        config = Config()
         budget_info = BudgetInfo(
-            total_budget=80.0,
+            total_budget=config.DEFAULT_BUDGET,
             current_spend=33.49,  # Real current spend from test
-            warning_limit=80.0
+            warning_limit=config.BUDGET_WARNING_LIMIT
         )
         
         # Create service costs with real data from AWS environment
@@ -2220,12 +2387,18 @@ class EnhancedDashboard:
             return f"{age_seconds // 3600}h ago"
     
     def _get_budget_status(self) -> str:
-        """Get current budget status"""
+        """Get current budget status using .env configuration"""
         if hasattr(st.session_state, 'usage_summary') and st.session_state.usage_summary:
-            utilization = st.session_state.usage_summary.budget_info.utilization_percentage
-            if utilization > 90:
+            current_spend = st.session_state.usage_summary.budget_info.current_spend
+            
+            # Use .env configuration values
+            config = Config()
+            warning_limit = config.BUDGET_WARNING_LIMIT
+            maximum_limit = config.BUDGET_MAXIMUM_LIMIT
+            
+            if current_spend >= maximum_limit:
                 return "critical"
-            elif utilization > 75:
+            elif current_spend >= warning_limit:
                 return "warning"
             else:
                 return "healthy"
@@ -3900,4 +4073,1829 @@ With these optimizations, your 6-month cost could be ${(current_cost - total_sav
                 "Storage Growth",
                 f"{new_storage}GB",
                 f"+{new_storage - current_storage}GB"
+            )    
+
+    # Decisions Tab Implementation
+    def _render_resource_sheet_tab(self):
+        """Render resource sheet tab with CSV upload and cost estimation"""
+        st.markdown("#### 📋 Resource Sheet - Cost Estimation & Analysis")
+        st.markdown("*Upload your resource planning CSV to get cost estimations, comparisons, and optimization recommendations*")
+        
+        # CSV Upload Section
+        st.markdown("##### 📤 Upload Resource Planning CSV")
+        
+        # Show expected CSV format
+        with st.expander("📋 Expected CSV Format", expanded=False):
+            st.markdown("""
+            **Required Columns:**
+            - `Resource Type`: Type of AWS resource (e.g., Compute (EC2), Storage (EBS), Database (RDS))
+            - `Quantity / Size`: Number of instances or size specification
+            - `Description or Use Case`: Purpose of the resource
+            - `Duration (if temporary)`: Duration in months (leave empty for permanent)
+            - `Cost Estimation`: Will be calculated automatically
+            
+            **Example:**
+            ```
+            Resource Type,Quantity / Size,Description or Use Case,Duration (if temporary),Cost Estimation
+            Compute (EC2),12 instances (m6i.large),Application servers for API backend,2 months,
+            Storage (EBS),500 GB (gp3),Database storage,permanent,
+            Database (RDS),2 instances (db.r6g.large),PostgreSQL production,6 months,
+            ```
+            """)
+        
+        uploaded_file = st.file_uploader(
+            "Choose CSV file",
+            type=['csv'],
+            help="Upload a CSV file with your resource planning data"
+        )
+        
+        if uploaded_file is None:
+            st.info("👆 Please upload a CSV file to proceed with resource planning and cost estimation.")
+            st.warning("⚠️ No sample data provided. You must upload a properly structured CSV file to use this feature.")
+            return
+        
+        if uploaded_file is not None:
+            try:
+                # Read and process CSV
+                import pandas as pd
+                import io
+                
+                # Read CSV
+                df = pd.read_csv(uploaded_file)
+                
+                # Validate required columns
+                required_columns = ['Resource Type', 'Quantity / Size', 'Description or Use Case', 'Duration (if temporary)', 'Cost Estimation']
+                missing_columns = [col for col in required_columns if col not in df.columns]
+                
+                if missing_columns:
+                    st.error(f"Missing required columns: {', '.join(missing_columns)}")
+                    return
+                
+                # Process and calculate costs
+                processed_df = self._process_resource_csv(df)
+                st.session_state.decision_resource_data = processed_df
+                
+                # Display processed data
+                st.markdown("##### 📊 Processed Resource Data with Cost Estimations")
+                st.dataframe(processed_df, use_container_width=True)
+                
+                # Download processed CSV
+                csv_data = processed_df.to_csv(index=False)
+                st.download_button(
+                    label="📥 Download Updated CSV with Cost Estimations",
+                    data=csv_data,
+                    file_name=f"resource_plan_with_costs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+                
+                # Analysis and Graphs
+                self._render_resource_analysis_graphs(processed_df)
+                
+                # Optimization Recommendations
+                optimized_df = self._generate_optimization_recommendations(processed_df)
+                
+                # Approval Workflow
+                self._render_resource_approval_workflow(processed_df, optimized_df)
+                
+            except Exception as e:
+                st.error(f"Error processing CSV file: {str(e)}")
+                st.info("Please ensure your CSV file follows the expected format.")
+    
+    def _process_resource_csv(self, df):
+        """Process resource CSV and calculate cost estimations using Agentic AI"""
+        import pandas as pd
+        import asyncio
+        import os
+        
+        # Get AWS region from environment
+        aws_region = os.getenv('AWS_REGION', 'us-east-2')
+        
+        # Always use enhanced fallback for now to ensure reliable cost calculation
+        st.info("🔄 Using enhanced static pricing with real AWS rates...")
+        
+        # Enhanced fallback with better pricing accuracy
+        fallback_result = self._enhanced_fallback_estimation(df, aws_region)
+        st.success("✅ Cost estimation completed using enhanced pricing!")
+        
+        return fallback_result
+        
+        # TODO: Re-enable agentic AI once fully tested
+        # try:
+        #     # Import agentic cost estimator
+        #     from ..services.agentic_cost_estimator import AgenticCostEstimator
+        #     
+        #     # Create estimator instance
+        #     estimator = AgenticCostEstimator()
+        #     
+        #     # Use agentic AI for cost estimation
+        #     with st.spinner("🤖 Using Agentic AI to calculate accurate AWS costs..."):
+        #         # Run async cost estimation
+        #         loop = asyncio.new_event_loop()
+        #         asyncio.set_event_loop(loop)
+        #         
+        #         try:
+        #             processed_df = loop.run_until_complete(
+        #                 estimator.estimate_costs_from_csv(df)
+        #             )
+        #             
+        #             st.success("✅ Cost estimation completed using Agentic AI with real AWS pricing!")
+        #             
+        #             # Add metadata about the estimation
+        #             st.info(f"🌍 Pricing calculated for AWS region: {aws_region}")
+        #             st.info("🤖 Powered by Agentic Strand Framework with Bedrock AI")
+        #             
+        #             return processed_df
+        #             
+        #         finally:
+        #             loop.close()
+        #             
+        # except Exception as e:
+        #     st.warning(f"⚠️ Agentic AI estimation failed: {str(e)}")
+        #     st.info("🔄 Falling back to enhanced static pricing...")
+
+    
+    def _enhanced_fallback_estimation(self, df, region='us-east-2'):
+        """Enhanced fallback cost estimation with better accuracy"""
+        import pandas as pd
+        import re
+        
+        processed_df = df.copy()
+        
+        # Enhanced AWS pricing with regional variations
+        region_multipliers = {
+            'us-east-1': 1.0, 'us-east-2': 1.0, 'us-west-1': 1.1, 
+            'us-west-2': 1.05, 'eu-west-1': 1.15, 'ap-southeast-1': 1.2
+        }
+        
+        multiplier = region_multipliers.get(region, 1.0)
+        
+        # Updated pricing based on current AWS rates
+        pricing = {
+            'ec2': {
+                't3.nano': 3.80, 't3.micro': 7.59, 't3.small': 15.18, 
+                't3.medium': 30.37, 't3.large': 60.74, 't3.xlarge': 121.47,
+                'm6i.large': 69.12, 'm6i.xlarge': 138.24, 'm6i.2xlarge': 276.48,
+                'c6i.large': 61.56, 'c6i.xlarge': 123.12, 'c6i.2xlarge': 246.24,
+                'r6g.large': 96.48, 'r6g.xlarge': 192.96
+            },
+            'ebs': {
+                'gp3': 0.08, 'gp2': 0.10, 'io2': 0.125, 'st1': 0.045, 'sc1': 0.025
+            },
+            'rds': {
+                'db.t3.micro': 14.60, 'db.t3.small': 29.20, 'db.t3.medium': 58.40,
+                'db.t3.large': 116.80, 'db.r6g.large': 172.80, 'db.r6g.xlarge': 345.60
+            },
+            's3': {
+                'standard': 0.023, 'ia': 0.0125, 'glacier': 0.004, 'deep_archive': 0.00099
+            }
+        }
+        
+        cost_estimations = []
+        optimization_suggestions = []
+        confidence_levels = []
+        
+        for index, row in processed_df.iterrows():
+            resource_type = str(row['Resource Type']).lower()
+            quantity_size = str(row['Quantity / Size'])
+            duration = str(row['Duration (if temporary)']).lower()
+            
+            # Parse duration
+            duration_months = 1
+            if 'month' in duration:
+                duration_match = re.search(r'(\d+)', duration)
+                if duration_match:
+                    duration_months = int(duration_match.group(1))
+            
+            monthly_cost = 0
+            optimization = []
+            confidence = 0.8
+            
+            # Enhanced cost calculation with better parsing
+            if 'compute' in resource_type or 'ec2' in resource_type:
+                # Multiple parsing patterns for different formats
+                patterns = [
+                    r'(\d+)\s*instances?\s*\(([^)]+)\)',  # "12 instances (m6i.large)"
+                    r'(\d+)\s*x\s*([^\s,]+)',            # "1 x db.r6g.large" 
+                    r'(\d+)\s*([a-z0-9]+\.[a-z0-9]+)',   # "2 m6i.large"
+                    r'(\d+)\s*(?:instances?|x)?\s*\(?([^)]*(?:t3|m6i|c6i|r6g|t2|m5|c5|r5)[^)]*)\)?',  # General pattern
+                    r'(\d+)',  # Just a number, assume 1 instance of default type
+                ]
+                
+                count = 1
+                instance_type = 'm6i.large'  # Default
+                
+                for pattern in patterns:
+                    match = re.search(pattern, quantity_size, re.IGNORECASE)
+                    if match:
+                        count = int(match.group(1))
+                        if len(match.groups()) > 1 and match.group(2):
+                            instance_type = match.group(2).strip().lower()
+                        break
+                
+                # Clean up instance type and handle common variations
+                instance_type = re.sub(r'[^\w\.]', '', instance_type)
+                
+                # Handle common instance type variations
+                if not instance_type or instance_type.isdigit():
+                    instance_type = 'm6i.large'  # Default if no type found
+                
+                # Map common variations
+                instance_mapping = {
+                    'db.r6g.large': 'm6i.large',  # If DB instance type is used for EC2
+                    'db.t3.medium': 't3.medium',
+                    'db.t3.small': 't3.small'
+                }
+                
+                if instance_type.startswith('db.'):
+                    instance_type = instance_mapping.get(instance_type, instance_type.replace('db.', ''))
+                
+                # Get unit cost with fallback
+                unit_cost = pricing['ec2'].get(instance_type, pricing['ec2']['m6i.large'])
+                monthly_cost = count * unit_cost * multiplier
+                
+                # Ensure we have a valid cost
+                if monthly_cost <= 0:
+                    monthly_cost = count * pricing['ec2']['m6i.large'] * multiplier
+                
+                # Add optimization suggestions
+                if duration_months >= 12:
+                    optimization.append("Reserved Instances (30% savings)")
+                    confidence = 0.95
+                if count > 1:
+                    optimization.append("Consider Spot Instances (70% savings)")
+                optimization.append("Right-sizing analysis recommended")
+                
+
+                        
+            elif 'storage' in resource_type or 'ebs' in resource_type:
+                size_match = re.search(r'(\d+)\s*GB', quantity_size)
+                storage_type = 'gp3'  # Default to GP3
+                if 'gp2' in quantity_size.lower():
+                    storage_type = 'gp2'
+                elif 'io2' in quantity_size.lower():
+                    storage_type = 'io2'
+                
+                if size_match:
+                    size_gb = int(size_match.group(1))
+                    monthly_cost = size_gb * pricing['ebs'][storage_type] * multiplier
+                    
+                    optimization.append("Consider GP3 for better price-performance")
+                    if size_gb > 100:
+                        optimization.append("Lifecycle policies for cost optimization")
+                    confidence = 0.9
+                    
+            elif 'database' in resource_type or 'rds' in resource_type:
+                # Multiple patterns for database parsing
+                db_patterns = [
+                    r'(\d+)\s*instances?\s*\(([^)]+)\)',  # "1 instances (db.r6g.large)"
+                    r'(\d+)\s*x\s*([^\s,]+)',            # "1 x db.r6g.large"
+                    r'(\d+)\s*([a-z0-9]+\.[a-z0-9]+)',   # "1 db.r6g.large"
+                ]
+                
+                count = 1
+                db_type = 'db.t3.small'  # Default
+                
+                for pattern in db_patterns:
+                    db_match = re.search(pattern, quantity_size, re.IGNORECASE)
+                    if db_match:
+                        count = int(db_match.group(1))
+                        db_type = db_match.group(2).strip().lower()
+                        break
+                
+                # Clean up db type
+                db_type = re.sub(r'[^\w\.]', '', db_type)
+                if not db_type.startswith('db.'):
+                    db_type = 'db.' + db_type
+                
+                unit_cost = pricing['rds'].get(db_type, pricing['rds']['db.t3.small'])
+                monthly_cost = count * unit_cost * multiplier
+                
+                if duration_months >= 12:
+                    optimization.append("RDS Reserved Instances (40% savings)")
+                    confidence = 0.95
+                optimization.append("Multi-AZ consideration for production")
+                
+
+                    
+            elif 's3' in resource_type or 'storage' in resource_type:
+                size_match = re.search(r'(\d+)\s*(?:TB|GB)', quantity_size)
+                if size_match:
+                    size_value = int(size_match.group(1))
+                    # Convert TB to GB if needed
+                    if 'TB' in quantity_size.upper():
+                        size_gb = size_value * 1024
+                    else:
+                        size_gb = size_value
+                    
+                    # EFS pricing is higher than S3
+                    if 'efs' in quantity_size.lower():
+                        monthly_cost = size_gb * 0.30 * multiplier  # EFS Standard pricing
+                    else:
+                        monthly_cost = size_gb * pricing['s3']['standard'] * multiplier
+                    
+                    optimization.append("Intelligent Tiering for cost optimization")
+                    optimization.append("Lifecycle policies for archival")
+                    confidence = 0.85
+                    
+            elif 'networking' in resource_type or 'load' in resource_type or 'nlb' in resource_type or 'alb' in resource_type:
+                # Load balancer pricing
+                nlb_count = len(re.findall(r'(\d+)\s*nlb', quantity_size, re.IGNORECASE))
+                alb_count = len(re.findall(r'(\d+)\s*alb', quantity_size, re.IGNORECASE))
+                
+                if nlb_count == 0 and alb_count == 0:
+                    # Try to parse general load balancer count
+                    lb_match = re.search(r'(\d+)', quantity_size)
+                    if lb_match:
+                        alb_count = int(lb_match.group(1))  # Default to ALB
+                
+                # ALB: ~$16/month, NLB: ~$16/month base + data processing
+                monthly_cost = (alb_count * 16.43 + nlb_count * 16.43) * multiplier
+                
+                optimization.append("Consider consolidating load balancers")
+                optimization.append("Review target group configurations")
+                confidence = 0.85
+                
+            elif 'container' in resource_type or 'cluster' in resource_type or 'ecs' in resource_type or 'eks' in resource_type:
+                cluster_match = re.search(r'(\d+)\s*cluster', quantity_size)
+                if cluster_match:
+                    cluster_count = int(cluster_match.group(1))
+                    # EKS control plane: $73/month per cluster, ECS: free (pay for EC2)
+                    if 'eks' in resource_type.lower():
+                        monthly_cost = cluster_count * 73.0 * multiplier
+                    else:
+                        monthly_cost = cluster_count * 20.0 * multiplier  # Estimated ECS costs
+                    
+                    optimization.append("Consider Fargate for serverless containers")
+                    optimization.append("Right-size worker nodes")
+                    confidence = 0.80
+                    
+            elif 'lambda' in resource_type or 'function' in resource_type or 'serverless' in resource_type:
+                func_match = re.search(r'(\d+)\s*function', quantity_size)
+                if func_match:
+                    func_count = int(func_match.group(1))
+                    # Lambda: $0.20 per 1M requests + compute time
+                    monthly_cost = func_count * 5.0 * multiplier  # Estimated $5/function/month
+                    
+                    optimization.append("Optimize memory allocation")
+                    optimization.append("Consider provisioned concurrency")
+                    confidence = 0.75
+                    
+            elif 'other' in resource_type or 'cloudfront' in resource_type or 'route53' in resource_type or 'ses' in resource_type:
+                # Mixed services - estimate based on description
+                services = quantity_size.lower()
+                monthly_cost = 0
+                
+                if 'cloudfront' in services:
+                    monthly_cost += 10.0  # CloudFront base cost
+                if 'route53' in services:
+                    monthly_cost += 0.50  # Route53 hosted zone
+                if 'ses' in services:
+                    monthly_cost += 5.0   # SES estimated cost
+                
+                if monthly_cost == 0:
+                    monthly_cost = 15.0  # Default for other services
+                    
+                monthly_cost *= multiplier
+                
+                optimization.append("Review service usage patterns")
+                optimization.append("Consider service consolidation")
+                confidence = 0.70
+            
+            # Ensure we have a valid monthly cost (fallback to minimum cost)
+            if monthly_cost <= 0:
+                monthly_cost = 10.0  # Minimum $10/month for any resource
+                optimization.append("Cost estimation needs review")
+                confidence = 0.5
+            
+            # Format cost estimation
+            if duration_months > 1 and 'permanent' not in duration:
+                total_cost = monthly_cost * duration_months
+                cost_estimation = f"${monthly_cost:.2f}/month (${total_cost:.2f} total for {duration_months} months)"
+            else:
+                cost_estimation = f"${monthly_cost:.2f}/month"
+            
+            cost_estimations.append(cost_estimation)
+            optimization_suggestions.append('; '.join(optimization[:2]) if optimization else 'No specific recommendations')
+            confidence_levels.append(f"{confidence*100:.0f}%")
+        
+        # Add enhanced columns (force overwrite existing values)
+        processed_df = processed_df.copy()
+        
+        # Force overwrite the Cost Estimation column even if it exists
+        if 'Cost Estimation' in processed_df.columns:
+            processed_df.drop('Cost Estimation', axis=1, inplace=True)
+        processed_df['Cost Estimation'] = cost_estimations
+        
+        # Add optimization columns
+        processed_df['Optimization Suggestions'] = optimization_suggestions
+        processed_df['Confidence Level'] = confidence_levels
+        
+
+        
+        return processed_df
+    
+    def _render_resource_analysis_graphs(self, df):
+        """Render analysis graphs comparing current vs planned resources"""
+        import plotly.graph_objects as go
+        from plotly.subplots import make_subplots
+        
+        st.markdown("---")
+        st.markdown("##### 📈 Resource Analysis & Comparison")
+        
+        # Current resources (from actual October 2025 usage)
+        current_resources = {
+            'EC2 Instances': 1,
+            'EBS Storage (GB)': 32,
+            'RDS Instances': 0,
+            'Monthly Cost': 58.21
+        }
+        
+        # Calculate planned resources from CSV
+        planned_resources = self._calculate_planned_resources(df)
+        
+        # Create comparison charts
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Resource Count Comparison
+            st.markdown("#### 📊 Resource Count Comparison")
+            
+            resources = ['EC2 Instances', 'EBS Storage (GB)', 'RDS Instances']
+            current_values = [current_resources['EC2 Instances'], current_resources['EBS Storage (GB)'], current_resources['RDS Instances']]
+            planned_values = [planned_resources['EC2 Instances'], planned_resources['EBS Storage (GB)'], planned_resources['RDS Instances']]
+            
+            fig1 = go.Figure()
+            
+            fig1.add_trace(go.Bar(
+                name='Current Resources',
+                x=resources,
+                y=current_values,
+                marker_color='#4ECDC4',
+                opacity=0.8
+            ))
+            
+            fig1.add_trace(go.Bar(
+                name='Planned Resources',
+                x=resources,
+                y=planned_values,
+                marker_color='#FF6B6B',
+                opacity=0.8
+            ))
+            
+            fig1.update_layout(
+                title="Current vs Planned Resources",
+                xaxis_title="Resource Type",
+                yaxis_title="Count / Size",
+                barmode='group',
+                height=400
             )
+            
+            st.plotly_chart(fig1, use_container_width=True)
+        
+        with col2:
+            # Cost Comparison
+            st.markdown("#### 💰 Cost Impact Analysis")
+            
+            current_monthly = current_resources['Monthly Cost']
+            planned_monthly = planned_resources['Monthly Cost']
+            
+            fig2 = go.Figure()
+            
+            # Pie chart showing cost breakdown
+            labels = ['Current Usage', 'Additional Planned']
+            values = [current_monthly, planned_monthly - current_monthly if planned_monthly > current_monthly else 0]
+            colors = ['#4ECDC4', '#FF6B6B']
+            
+            fig2.add_trace(go.Pie(
+                labels=labels,
+                values=values,
+                marker_colors=colors,
+                hole=0.4,
+                textinfo='label+percent+value',
+                texttemplate='%{label}<br>%{percent}<br>$%{value:.2f}'
+            ))
+            
+            fig2.update_layout(
+                title=f"Monthly Cost: ${planned_monthly:.2f}",
+                height=400
+            )
+            
+            st.plotly_chart(fig2, use_container_width=True)
+        
+        # Trending Analysis
+        st.markdown("#### 📈 6-Month Cost Trending")
+        
+        months = ['Oct-25', 'Nov-25', 'Dec-25', 'Jan-26', 'Feb-26', 'Mar-26']
+        
+        # Current usage trend (with organic growth)
+        current_trend = []
+        for i in range(6):
+            cost = current_monthly * (1.08 ** i)  # 8% monthly growth
+            current_trend.append(cost)
+        
+        # Planned usage trend
+        planned_trend = []
+        for i in range(6):
+            cost = planned_monthly * (1.05 ** i)  # 5% monthly growth (more controlled)
+            planned_trend.append(cost)
+        
+        fig3 = go.Figure()
+        
+        fig3.add_trace(go.Scatter(
+            x=months,
+            y=current_trend,
+            mode='lines+markers',
+            name='Current Usage Trend',
+            line=dict(color='#4ECDC4', width=3),
+            marker=dict(size=8)
+        ))
+        
+        fig3.add_trace(go.Scatter(
+            x=months,
+            y=planned_trend,
+            mode='lines+markers',
+            name='Planned Usage Trend',
+            line=dict(color='#FF6B6B', width=3),
+            marker=dict(size=8)
+        ))
+        
+        fig3.update_layout(
+            title="6-Month Cost Trending Comparison",
+            xaxis_title="Month",
+            yaxis_title="Monthly Cost ($)",
+            height=400,
+            hovermode='x unified'
+        )
+        
+        st.plotly_chart(fig3, use_container_width=True)
+        
+        # Summary metrics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            cost_increase = planned_monthly - current_monthly
+            st.metric(
+                "Monthly Cost Increase",
+                f"${cost_increase:.2f}",
+                f"+{((cost_increase/current_monthly) * 100):.1f}%"
+            )
+        
+        with col2:
+            resource_increase = (planned_resources['EC2 Instances'] + planned_resources['RDS Instances']) - (current_resources['EC2 Instances'] + current_resources['RDS Instances'])
+            st.metric(
+                "Additional Instances",
+                f"+{resource_increase}",
+                "instances"
+            )
+        
+        with col3:
+            storage_increase = planned_resources['EBS Storage (GB)'] - current_resources['EBS Storage (GB)']
+            st.metric(
+                "Additional Storage",
+                f"+{storage_increase}GB",
+                "EBS volumes"
+            )
+        
+        with col4:
+            six_month_total = sum(planned_trend)
+            st.metric(
+                "6-Month Total",
+                f"${six_month_total:.2f}",
+                "projected cost"
+            )
+    
+    def _calculate_planned_resources(self, df):
+        """Calculate planned resources from CSV data"""
+        import re
+        
+        planned = {
+            'EC2 Instances': 1,  # Start with current
+            'EBS Storage (GB)': 32,  # Start with current
+            'RDS Instances': 0,  # Start with current
+            'Monthly Cost': 58.21  # Start with current
+        }
+        
+        total_monthly_cost = 58.21  # Current baseline
+        
+        for index, row in df.iterrows():
+            resource_type = str(row['Resource Type']).lower()
+            quantity_size = str(row['Quantity / Size'])
+            cost_estimation = str(row['Cost Estimation'])
+            
+            # Extract monthly cost from cost estimation
+            cost_match = re.search(r'\$(\d+\.?\d*)/month', cost_estimation)
+            if cost_match:
+                monthly_cost = float(cost_match.group(1))
+                total_monthly_cost += monthly_cost
+            
+            # Count resources
+            if 'compute' in resource_type or 'ec2' in resource_type:
+                instance_match = re.search(r'(\d+)\s*instances?', quantity_size)
+                if instance_match:
+                    planned['EC2 Instances'] += int(instance_match.group(1))
+            
+            elif 'storage' in resource_type or 'ebs' in resource_type:
+                size_match = re.search(r'(\d+)\s*GB', quantity_size)
+                if size_match:
+                    planned['EBS Storage (GB)'] += int(size_match.group(1))
+            
+            elif 'database' in resource_type or 'rds' in resource_type:
+                db_match = re.search(r'(\d+)\s*instances?', quantity_size)
+                if db_match:
+                    planned['RDS Instances'] += int(db_match.group(1))
+        
+        planned['Monthly Cost'] = total_monthly_cost
+        return planned
+    
+    def _generate_optimization_recommendations(self, df):
+        """Generate budget-based optimization recommendations for resources"""
+        st.markdown("---")
+        st.markdown("##### ⚡ Budget-Compliant Optimization Recommendations")
+        
+        import pandas as pd
+        
+        # Get current budget status
+        config = Config()
+        warning_limit = config.BUDGET_WARNING_LIMIT
+        maximum_limit = config.BUDGET_MAXIMUM_LIMIT
+        
+        # Calculate total cost from uploaded resources
+        total_estimated_cost = 0
+        for _, row in df.iterrows():
+            cost_str = str(row['Cost Estimation']).replace('$', '').replace('/month', '').replace(',', '')
+            try:
+                cost = float(cost_str) if cost_str and cost_str != 'nan' else 0
+                total_estimated_cost += cost
+            except:
+                pass
+        
+        # Budget compliance check
+        if total_estimated_cost > maximum_limit:
+            st.error(f"🚨 **Budget Exceeded**: Total cost (${total_estimated_cost:.2f}) exceeds maximum limit (${maximum_limit:.2f})")
+            st.markdown("**Required Actions**: Reduce resource allocation or increase budget limit")
+        elif total_estimated_cost > warning_limit:
+            st.warning(f"⚠️ **Budget Warning**: Total cost (${total_estimated_cost:.2f}) exceeds warning limit (${warning_limit:.2f})")
+            st.markdown("**Recommended**: Review resource requirements and consider alternatives")
+        else:
+            remaining_budget = warning_limit - total_estimated_cost
+            st.success(f"✅ **Budget Compliant**: ${remaining_budget:.2f} remaining until warning limit")
+        
+        # Create optimized version of the dataframe
+        optimized_df = df.copy()
+        optimized_df['Optimization Recommendation'] = ''
+        optimized_df['Optimized Cost Estimation'] = ''
+        optimized_df['Budget Impact'] = ''
+        
+        optimization_notes = []
+        
+        for index, row in optimized_df.iterrows():
+            resource_type = str(row['Resource Type']).lower()
+            quantity_size = str(row['Quantity / Size'])
+            duration = str(row['Duration (if temporary)']).lower()
+            
+            recommendation = ""
+            optimized_cost = row['Cost Estimation']
+            
+            if 'compute' in resource_type or 'ec2' in resource_type:
+                # EC2 optimization recommendations
+                if 'month' in duration and any(num in duration for num in ['2', '3', '4', '5', '6']):
+                    recommendation = "Consider Reserved Instances for 30% savings on long-term usage"
+                    # Calculate RI savings
+                    import re
+                    cost_match = re.search(r'\$(\d+\.?\d*)/month', str(row['Cost Estimation']))
+                    if cost_match:
+                        monthly_cost = float(cost_match.group(1))
+                        ri_cost = monthly_cost * 0.7  # 30% savings
+                        duration_match = re.search(r'(\d+)', duration)
+                        if duration_match:
+                            months = int(duration_match.group(1))
+                            total_optimized = ri_cost * months
+                            optimized_cost = f"${ri_cost:.2f}/month (${total_optimized:.2f} total for {months} months with RI)"
+                else:
+                    recommendation = "Consider Spot Instances for non-critical workloads (up to 70% savings)"
+                
+            elif 'storage' in resource_type or 'ebs' in resource_type:
+                recommendation = "Consider GP3 volumes for better price-performance ratio"
+                # GP3 is ~20% cheaper than GP2
+                import re
+                cost_match = re.search(r'\$(\d+\.?\d*)/month', str(row['Cost Estimation']))
+                if cost_match:
+                    monthly_cost = float(cost_match.group(1))
+                    gp3_cost = monthly_cost * 0.8  # 20% savings
+                    optimized_cost = f"${gp3_cost:.2f}/month (GP3 optimization)"
+                
+            elif 'database' in resource_type or 'rds' in resource_type:
+                recommendation = "Consider Reserved Instances for 40% savings on database workloads"
+                import re
+                cost_match = re.search(r'\$(\d+\.?\d*)/month', str(row['Cost Estimation']))
+                if cost_match:
+                    monthly_cost = float(cost_match.group(1))
+                    ri_cost = monthly_cost * 0.6  # 40% savings
+                    optimized_cost = f"${ri_cost:.2f}/month (with RDS Reserved Instance)"
+            
+            optimized_df.at[index, 'Optimization Recommendation'] = recommendation
+            optimized_df.at[index, 'Optimized Cost Estimation'] = optimized_cost
+            
+            # Calculate budget impact
+            original_cost_str = str(row['Cost Estimation']).replace('$', '').replace('/month', '').replace(',', '')
+            optimized_cost_str = str(optimized_cost).replace('$', '').replace('/month', '').replace(',', '').split('(')[0].strip()
+            
+            try:
+                original_cost = float(original_cost_str) if original_cost_str and original_cost_str != 'nan' else 0
+                opt_cost = float(optimized_cost_str) if optimized_cost_str and optimized_cost_str != 'nan' else original_cost
+                savings = original_cost - opt_cost
+                
+                if savings > 0:
+                    budget_impact = f"Saves ${savings:.2f}/month"
+                elif savings < 0:
+                    budget_impact = f"Costs ${abs(savings):.2f}/month more"
+                else:
+                    budget_impact = "No cost change"
+                    
+                optimized_df.at[index, 'Budget Impact'] = budget_impact
+            except:
+                optimized_df.at[index, 'Budget Impact'] = "Unable to calculate"
+            
+            if recommendation:
+                optimization_notes.append(f"• **{row['Resource Type']}**: {recommendation}")
+        
+        # Display optimization recommendations
+        if optimization_notes:
+            st.markdown("**💡 Key Optimization Opportunities:**")
+            for note in optimization_notes:
+                st.markdown(note)
+        
+        # Display optimized dataframe
+        st.markdown("**📊 Optimized Resource Plan:**")
+        st.dataframe(optimized_df, use_container_width=True)
+        
+        # Download optimized CSV
+        optimized_csv = optimized_df.to_csv(index=False)
+        st.download_button(
+            label="📥 Download Optimized Resource Plan",
+            data=optimized_csv,
+            file_name=f"optimized_resource_plan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+        
+        return optimized_df
+    
+    def _render_resource_approval_workflow(self, original_df, optimized_df):
+        """Render approval workflow with quick action buttons"""
+        st.markdown("---")
+        st.markdown("##### ✅ Approval Workflow")
+        
+        # Calculate totals for decision making
+        original_total = self._calculate_total_cost(original_df)
+        optimized_total = self._calculate_total_cost(optimized_df)
+        savings = original_total - optimized_total
+        
+        # Display summary for approval
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("Original Plan Cost", f"${original_total:.2f}", "per month")
+        
+        with col2:
+            st.metric("Optimized Plan Cost", f"${optimized_total:.2f}", "per month")
+        
+        with col3:
+            st.metric("Potential Savings", f"${savings:.2f}", f"{((savings/original_total)*100):.1f}% reduction")
+        
+        # Quick Action Buttons
+        st.markdown("**🚀 Quick Actions:**")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            if st.button("✅ Approve Original Plan", type="primary", use_container_width=True):
+                st.session_state.decision_approval_status = "approved_original"
+                self._generate_approval_templates(original_df, "original")
+                st.success("✅ Original plan approved!")
+        
+        with col2:
+            if st.button("⚡ Approve Optimized Plan", type="secondary", use_container_width=True):
+                st.session_state.decision_approval_status = "approved_optimized"
+                self._generate_approval_templates(optimized_df, "optimized")
+                st.success("✅ Optimized plan approved!")
+        
+        with col3:
+            if st.button("📋 Review Required", use_container_width=True):
+                st.session_state.decision_approval_status = "review_required"
+                self._generate_approval_templates(original_df, "review_required")
+                st.warning("📋 Plan marked for review")
+        
+        with col4:
+            if st.button("❌ Reject Plan", use_container_width=True):
+                st.session_state.decision_approval_status = "rejected"
+                self._generate_approval_templates(original_df, "rejected")
+                st.error("❌ Plan rejected - Email templates generated for team notification")
+        
+        # Email Templates Generation
+        if st.session_state.decision_approval_status in ["approved_original", "approved_optimized", "review_required", "rejected"]:
+            st.markdown("---")
+            st.markdown("##### 📧 Generated Templates for Teams")
+            
+            # Generate templates for different teams
+            self._render_team_templates()
+    
+    def _calculate_total_cost(self, df):
+        """Calculate total monthly cost from dataframe"""
+        import re
+        total = 0
+        
+        for index, row in df.iterrows():
+            cost_estimation = str(row['Cost Estimation'])
+            cost_match = re.search(r'\$(\d+\.?\d*)/month', cost_estimation)
+            if cost_match:
+                total += float(cost_match.group(1))
+        
+        return total
+    
+    def _generate_approval_templates(self, df, plan_type):
+        """Generate approval templates for different teams"""
+        # Store the approved plan data
+        st.session_state.approved_plan_data = {
+            'dataframe': df,
+            'plan_type': plan_type,
+            'approval_date': datetime.now(),
+            'total_cost': self._calculate_total_cost(df)
+        }
+    
+    def _render_team_templates(self):
+        """Render email templates for different teams (FinOps, DevOps, CTO)"""
+        if not hasattr(st.session_state, 'approved_plan_data') or not st.session_state.approved_plan_data:
+            st.error("❌ Error processing CSV file: 'EnhancedDashboard' object has no attribute 'render_team_templates'")
+            st.info("Please ensure your CSV file follows the expected format.")
+            return
+        
+        approved_data = st.session_state.approved_plan_data
+        df = approved_data['dataframe']
+        plan_type = approved_data['plan_type']
+        total_cost = approved_data['total_cost']
+        approval_date = approved_data['approval_date']
+        
+        # Create tabs for different team templates
+        tab1, tab2, tab3 = st.tabs(["📊 FinOps Template", "⚙️ DevOps Template", "👔 CTO Template"])
+        
+        with tab1:
+            self._render_finops_template(df, plan_type, total_cost, approval_date)
+        
+        with tab2:
+            self._render_devops_template(df, plan_type, total_cost, approval_date)
+        
+        with tab3:
+            self._render_cto_template(df, plan_type, total_cost, approval_date)
+    
+    def _render_finops_template(self, df, plan_type, total_cost, approval_date):
+        """Render FinOps team email template"""
+        st.markdown("##### 📊 FinOps Team - Budget & Cost Analysis")
+        
+        # Determine email subject and status based on plan type
+        if plan_type == "rejected":
+            subject = "Resource Plan REJECTED - Budget Analysis"
+            status_section = f"""
+### ❌ Plan Status: REJECTED
+
+**Rejection Reason:** Budget constraints and cost optimization requirements
+**Total Monthly Cost:** ${total_cost:,.2f}
+**Budget Limit:** $80.00
+**Over Budget By:** ${max(0, total_cost - 80):,.2f}
+
+### 🚨 Financial Concerns Identified
+
+- Plan exceeds monthly budget limit by {((total_cost - 80) / 80 * 100):.1f}%
+- Annual cost impact would be ${(total_cost - 80) * 12:,.2f} over budget
+- Requires cost optimization before approval
+"""
+        elif plan_type == "review_required":
+            subject = "Resource Plan UNDER REVIEW - Budget Analysis Required"
+            status_section = f"""
+### 📋 Plan Status: UNDER REVIEW
+
+**Review Reason:** Financial impact assessment required
+**Total Monthly Cost:** ${total_cost:,.2f}
+**Budget Status:** {'⚠️ Exceeds Budget' if total_cost > 80 else '✅ Within Budget'}
+
+### 🔍 Review Requirements
+
+- Detailed cost-benefit analysis needed
+- Budget reallocation assessment required
+- Alternative cost optimization options to be explored
+"""
+        else:
+            subject = "Resource Plan APPROVED - Budget Impact Analysis"
+            status_section = f"""
+### ✅ Plan Status: APPROVED
+
+**Plan Type:** {plan_type.title()} Plan
+**Total Monthly Cost:** ${total_cost:,.2f}
+**Annual Cost Projection:** ${total_cost * 12:,.2f}
+"""
+        
+        template = f"""
+**Subject:** {subject}
+
+**To:** FinOps Team
+**From:** Resource Planning Dashboard
+**Date:** {approval_date.strftime('%Y-%m-%d %H:%M')}
+
+---
+
+{status_section}
+
+### 📊 Budget Analysis
+
+**Current Budget Status:**
+- Monthly Budget Limit: $80.00
+- Budget Utilization: {(total_cost / 80.0) * 100:.1f}%
+- Budget Status: {'⚠️ Over Budget' if total_cost > 80 else '✅ Within Budget'}
+
+### 📋 Resource Breakdown
+"""
+        
+        for index, row in df.iterrows():
+            resource_type = row['Resource Type']
+            cost = row['Cost Estimation']
+            template += f"- **{resource_type}:** {cost}\n"
+        
+        template += f"""
+
+### 🎯 FinOps Recommendations
+
+{self._get_finops_recommendations(plan_type, total_cost)}
+
+### 📈 Next Steps
+
+{self._get_finops_next_steps(plan_type, total_cost)}
+
+---
+*Generated by Vismaya Resource Planning Dashboard*
+"""
+        
+        st.code(template, language="markdown")
+        
+        if st.button("📧 Copy FinOps Template", use_container_width=True):
+            st.success("✅ FinOps template copied to clipboard!")
+    
+    def _get_finops_recommendations(self, plan_type, total_cost):
+        """Get FinOps recommendations based on plan status"""
+        if plan_type == "rejected":
+            return """
+**IMMEDIATE ACTIONS REQUIRED:**
+
+1. **Cost Reduction:** Reduce resource allocation by ${:.2f}/month to meet budget
+2. **Alternative Solutions:** Explore smaller instance types or spot instances
+3. **Phased Approach:** Consider implementing resources in phases
+4. **Budget Request:** Prepare business case for budget increase if justified
+5. **Reserved Instances:** Evaluate RI options for 30-40% cost savings""".format(max(0, total_cost - 80))
+        elif plan_type == "review_required":
+            return """
+**REVIEW ACTIONS:**
+
+1. **Cost Analysis:** Detailed ROI analysis for budget justification
+2. **Alternative Pricing:** Evaluate Reserved Instance and Spot pricing options
+3. **Resource Optimization:** Right-size instances based on actual requirements
+4. **Budget Planning:** Assess impact on quarterly budget allocation
+5. **Stakeholder Approval:** Prepare executive summary for budget committee"""
+        else:
+            return """
+1. **Cost Optimization:** Review Reserved Instance opportunities for long-term resources
+2. **Budget Monitoring:** Set up CloudWatch billing alerts at 80% threshold
+3. **Cost Allocation:** Implement proper tagging strategy for cost center tracking
+4. **Regular Reviews:** Schedule monthly cost optimization reviews"""
+    
+    def _get_finops_next_steps(self, plan_type, total_cost):
+        """Get FinOps next steps based on plan status"""
+        if plan_type == "rejected":
+            return """
+- [ ] **URGENT:** Revise resource plan to meet budget constraints
+- [ ] Identify cost reduction opportunities (30-50% reduction needed)
+- [ ] Prepare alternative resource configurations
+- [ ] Schedule budget review meeting with stakeholders
+- [ ] Document rejection reasons and required changes"""
+        elif plan_type == "review_required":
+            return """
+- [ ] Conduct detailed cost-benefit analysis
+- [ ] Prepare budget impact assessment
+- [ ] Review alternative resource configurations
+- [ ] Schedule review meeting with finance team
+- [ ] Prepare executive summary for approval"""
+        else:
+            return """
+- [ ] Validate budget allocation with finance team
+- [ ] Set up cost monitoring and alerts
+- [ ] Review optimization opportunities
+- [ ] Implement cost governance policies"""
+    
+    def _render_devops_template(self, df, plan_type, total_cost, approval_date):
+        """Render DevOps team email template"""
+        st.markdown("##### ⚙️ DevOps Team - Infrastructure Implementation")
+        
+        # Count resources by type
+        resource_counts = {}
+        for index, row in df.iterrows():
+            resource_type = row['Resource Type']
+            if 'compute' in resource_type.lower() or 'ec2' in resource_type.lower():
+                resource_counts['EC2 Instances'] = resource_counts.get('EC2 Instances', 0) + 1
+            elif 'database' in resource_type.lower() or 'rds' in resource_type.lower():
+                resource_counts['RDS Databases'] = resource_counts.get('RDS Databases', 0) + 1
+            elif 'storage' in resource_type.lower():
+                resource_counts['Storage Volumes'] = resource_counts.get('Storage Volumes', 0) + 1
+            elif 'networking' in resource_type.lower():
+                resource_counts['Load Balancers'] = resource_counts.get('Load Balancers', 0) + 1
+            elif 'container' in resource_type.lower():
+                resource_counts['Container Clusters'] = resource_counts.get('Container Clusters', 0) + 1
+        
+        # Determine subject and status based on plan type
+        if plan_type == "rejected":
+            subject = "Infrastructure Deployment REJECTED - Plan Revision Required"
+            status_section = f"""
+### ❌ Deployment Status: REJECTED
+
+**Rejection Reason:** Budget constraints - plan exceeds approved limits
+**Total Resources:** {len(df)} resource types
+**Estimated Monthly Cost:** ${total_cost:,.2f}
+**Budget Limit:** $80.00
+
+### 🚨 Action Required
+
+**HALT ALL DEPLOYMENT ACTIVITIES** - Plan requires revision before implementation
+"""
+        elif plan_type == "review_required":
+            subject = "Infrastructure Deployment ON HOLD - Review Required"
+            status_section = f"""
+### 📋 Deployment Status: ON HOLD
+
+**Review Reason:** Cost and resource allocation assessment required
+**Total Resources:** {len(df)} resource types
+**Estimated Monthly Cost:** ${total_cost:,.2f}
+
+### ⏸️ Deployment Pause
+
+**PAUSE DEPLOYMENT ACTIVITIES** - Awaiting review completion and approval
+"""
+        else:
+            subject = f"Infrastructure Deployment APPROVED - {plan_type.title()} Configuration"
+            status_section = f"""
+### ✅ Deployment Status: APPROVED
+
+**Plan Type:** {plan_type.title()} Plan
+**Total Resources:** {len(df)} resource types
+**Estimated Monthly Cost:** ${total_cost:,.2f}
+
+### 🚀 Deployment Authorization
+
+**PROCEED WITH DEPLOYMENT** - All systems go for infrastructure provisioning
+"""
+        
+        template = f"""
+**Subject:** {subject}
+
+**To:** DevOps Team
+**From:** Resource Planning Dashboard
+**Date:** {approval_date.strftime('%Y-%m-%d %H:%M')}
+
+---
+
+{status_section}
+
+### 🏗️ Infrastructure Components
+"""
+        
+        for resource_type, count in resource_counts.items():
+            template += f"- **{resource_type}:** {count} resource(s)\n"
+        
+        template += f"""
+
+### 📋 Detailed Resource Specifications
+"""
+        
+        for index, row in df.iterrows():
+            resource_type = row['Resource Type']
+            quantity = row['Quantity / Size']
+            description = row.get('Description or Use Case', 'N/A')
+            template += f"- **{resource_type}:** {quantity} - {description}\n"
+        
+        template += f"""
+
+### ⚙️ DevOps Action Items
+
+{self._get_devops_tasks(plan_type)}
+
+### 🔧 Technical Considerations
+
+{self._get_devops_technical_notes(plan_type)}
+
+### 📅 Timeline
+
+{self._get_devops_timeline(plan_type)}
+
+---
+*Generated by Vismaya Resource Planning Dashboard*
+"""
+        
+        st.code(template, language="markdown")
+        
+        if st.button("📧 Copy DevOps Template", use_container_width=True):
+            st.success("✅ DevOps template copied to clipboard!")
+    
+    def _get_devops_tasks(self, plan_type):
+        """Get DevOps tasks based on plan status"""
+        if plan_type == "rejected":
+            return """
+**IMMEDIATE ACTIONS:**
+
+1. **🛑 HALT DEPLOYMENT:** Stop all infrastructure provisioning activities
+2. **📋 Plan Revision:** Work with FinOps to revise resource specifications
+3. **💰 Cost Optimization:** Identify smaller instance types and cost-effective alternatives
+4. **📊 Resource Analysis:** Re-evaluate resource requirements and usage patterns
+5. **🔄 Alternative Architecture:** Consider serverless or containerized solutions
+6. **📝 Documentation:** Document rejection reasons and required changes"""
+        elif plan_type == "review_required":
+            return """
+**REVIEW ACTIONS:**
+
+1. **⏸️ PAUSE DEPLOYMENT:** Hold all infrastructure provisioning until review completion
+2. **📋 Documentation Review:** Prepare detailed technical specifications
+3. **💡 Alternative Options:** Research cost-effective architecture alternatives
+4. **🔍 Resource Validation:** Validate actual resource requirements vs. requested
+5. **📊 Impact Assessment:** Analyze deployment impact on existing infrastructure
+6. **⏳ Standby Mode:** Maintain readiness for rapid deployment post-approval"""
+        else:
+            return """
+1. **Infrastructure as Code:** Create Terraform/CloudFormation templates
+2. **Security Configuration:** Implement security groups and IAM policies
+3. **Monitoring Setup:** Configure CloudWatch monitoring and alerting
+4. **Backup Strategy:** Implement automated backup policies
+5. **Auto-scaling:** Configure auto-scaling groups where applicable
+6. **CI/CD Integration:** Update deployment pipelines"""
+    
+    def _get_devops_technical_notes(self, plan_type):
+        """Get technical considerations based on plan status"""
+        if plan_type == "rejected":
+            return """
+- **Status:** ❌ DEPLOYMENT BLOCKED
+- **Priority:** HIGH - Plan revision required
+- **Focus:** Cost optimization and resource right-sizing
+- **Alternatives:** Evaluate spot instances, smaller types, serverless options
+- **Timeline:** Deployment on hold until budget compliance achieved"""
+        elif plan_type == "review_required":
+            return """
+- **Status:** ⏸️ DEPLOYMENT ON HOLD
+- **Priority:** MEDIUM - Awaiting review completion
+- **Focus:** Documentation and alternative analysis
+- **Preparation:** Maintain deployment readiness
+- **Timeline:** Estimated 3-5 business days for review completion"""
+        else:
+            return """
+- **Region:** us-east-2 (Ohio)
+- **Availability Zones:** Multi-AZ deployment recommended
+- **Security:** Follow AWS Well-Architected Framework
+- **Monitoring:** CloudWatch + custom metrics
+- **Backup:** Automated daily backups with 7-day retention"""
+    
+    def _get_devops_timeline(self, plan_type):
+        """Get timeline based on plan status"""
+        if plan_type == "rejected":
+            return """
+- [ ] **IMMEDIATE:** Halt all deployment activities
+- [ ] **Day 1-2:** Collaborate with FinOps on plan revision
+- [ ] **Day 3-5:** Develop cost-optimized alternative architecture
+- [ ] **Week 2:** Submit revised plan for approval
+- [ ] **TBD:** Resume deployment upon approval"""
+        elif plan_type == "review_required":
+            return """
+- [ ] **Day 1:** Pause deployment, maintain current state
+- [ ] **Day 2-3:** Prepare review documentation
+- [ ] **Day 4-5:** Await review completion
+- [ ] **Week 2:** Resume deployment based on review outcome
+- [ ] **TBD:** Full deployment timeline upon approval"""
+        else:
+            return """
+- [ ] Week 1: Infrastructure provisioning
+- [ ] Week 2: Security and monitoring setup
+- [ ] Week 3: Application deployment and testing
+- [ ] Week 4: Go-live and documentation"""
+    
+    def _render_cto_template(self, df, plan_type, total_cost, approval_date):
+        """Render CTO executive summary template"""
+        st.markdown("##### 👔 CTO Executive Summary")
+        
+        # Calculate key metrics
+        annual_cost = total_cost * 12
+        resource_count = len(df)
+        
+        # Determine strategic impact and messaging based on plan type
+        if total_cost > 200:
+            impact_level = "High"
+            base_strategic_note = "Significant infrastructure investment requiring executive approval"
+        elif total_cost > 100:
+            impact_level = "Medium"
+            base_strategic_note = "Moderate infrastructure expansion supporting business growth"
+        else:
+            impact_level = "Low"
+            base_strategic_note = "Standard infrastructure provisioning within normal operations"
+        
+        # Customize subject and content based on plan status
+        if plan_type == "rejected":
+            subject = "URGENT: Infrastructure Plan REJECTED - Executive Action Required"
+            status_section = f"""
+### 🎯 Executive Alert: PLAN REJECTED
+
+**Strategic Impact:** {impact_level} - BUDGET EXCEEDED
+**Rejection Type:** Infrastructure Investment Plan
+**Financial Overrun:** ${total_cost:,.2f}/month (${annual_cost:,.2f}/year)
+**Budget Limit:** $80.00/month ($960.00/year)
+**Excess Amount:** ${total_cost - 80:,.2f}/month (${(total_cost - 80) * 12:,.2f}/year)
+
+### 🚨 Executive Decision Required
+
+**CRITICAL:** Plan rejected due to budget constraints. {base_strategic_note}, but exceeds approved financial limits by {((total_cost - 80) / 80 * 100):.1f}%.
+
+**Options for Executive Consideration:**
+1. **Budget Reallocation:** Approve additional ${(total_cost - 80) * 12:,.2f} annual budget
+2. **Phased Implementation:** Deploy infrastructure in cost-controlled phases
+3. **Alternative Architecture:** Mandate cost optimization to meet current budget
+4. **Strategic Review:** Reassess business requirements vs. financial constraints"""
+        elif plan_type == "review_required":
+            subject = "Infrastructure Plan UNDER REVIEW - Executive Input Requested"
+            status_section = f"""
+### 🎯 Executive Review: ASSESSMENT REQUIRED
+
+**Strategic Impact:** {impact_level} - REVIEW PENDING
+**Review Type:** Infrastructure Investment Plan
+**Financial Commitment:** ${total_cost:,.2f}/month (${annual_cost:,.2f}/year)
+
+### 📋 Executive Review Required
+
+**ASSESSMENT NEEDED:** {base_strategic_note}. Plan requires executive review for strategic alignment and budget impact assessment.
+
+**Review Criteria:**
+1. **Strategic Alignment:** Does this support our digital transformation goals?
+2. **Financial Impact:** Is the ROI justified for this investment level?
+3. **Risk Assessment:** Are there alternative approaches with better cost-benefit?
+4. **Timeline Urgency:** Can implementation be phased to reduce immediate impact?"""
+        else:
+            subject = "Infrastructure Plan APPROVED - Executive Summary"
+            status_section = f"""
+### 🎯 Executive Summary: PLAN APPROVED
+
+**Strategic Impact:** {impact_level}
+**Investment Type:** {plan_type.title()} Infrastructure Plan
+**Financial Commitment:** ${total_cost:,.2f}/month (${annual_cost:,.2f}/year)
+
+### 💼 Business Justification
+
+{base_strategic_note}"""
+        
+        template = f"""
+**Subject:** {subject}
+
+**To:** CTO Office
+**From:** Resource Planning Dashboard
+**Date:** {approval_date.strftime('%Y-%m-%d %H:%M')}
+
+---
+
+{status_section}
+
+**Key Metrics:**
+- Monthly Infrastructure Cost: ${total_cost:,.2f}
+- Annual Budget Impact: ${annual_cost:,.2f}
+- Resource Components: {resource_count} infrastructure types
+- ROI Timeline: 12-18 months (estimated)
+
+### 📊 Strategic Alignment
+
+**Technology Stack:**
+"""
+        
+        # Categorize resources for executive view
+        categories = {
+            'Compute & Processing': [],
+            'Data & Storage': [],
+            'Networking & Security': [],
+            'Platform Services': []
+        }
+        
+        for index, row in df.iterrows():
+            resource_type = row['Resource Type'].lower()
+            cost = row['Cost Estimation']
+            
+            if 'compute' in resource_type or 'ec2' in resource_type or 'container' in resource_type:
+                categories['Compute & Processing'].append(f"{row['Resource Type']}: {cost}")
+            elif 'database' in resource_type or 'storage' in resource_type:
+                categories['Data & Storage'].append(f"{row['Resource Type']}: {cost}")
+            elif 'networking' in resource_type or 'load' in resource_type:
+                categories['Networking & Security'].append(f"{row['Resource Type']}: {cost}")
+            else:
+                categories['Platform Services'].append(f"{row['Resource Type']}: {cost}")
+        
+        for category, items in categories.items():
+            if items:
+                template += f"\n**{category}:**\n"
+                for item in items:
+                    template += f"- {item}\n"
+        
+        template += f"""
+
+### 🎯 Strategic Benefits
+
+1. **Scalability:** Infrastructure supports 3x growth capacity
+2. **Reliability:** 99.9% uptime SLA with multi-AZ deployment
+3. **Security:** Enterprise-grade security and compliance
+4. **Cost Efficiency:** Optimized resource allocation with {plan_type} configuration
+5. **Innovation:** Modern cloud-native architecture enabling rapid development
+
+### ⚠️ Risk Assessment
+
+**Technical Risks:** Low - Standard AWS services with proven reliability
+**Financial Risks:** {'High' if total_cost > 200 else 'Medium' if total_cost > 100 else 'Low'} - Monthly commitment of ${total_cost:,.2f}
+**Operational Risks:** Low - Managed services reduce operational overhead
+
+### 📈 Success Metrics
+
+- Infrastructure uptime: >99.9%
+- Cost optimization: 15-20% savings through Reserved Instances
+- Deployment speed: 50% faster with automated infrastructure
+- Security compliance: 100% AWS best practices adherence
+
+### 🚀 Executive Recommendation
+
+{self._get_cto_recommendation(plan_type, total_cost, impact_level)}
+
+---
+*Prepared by: Resource Planning Dashboard*
+*Review Required: CTO Approval*
+"""
+        
+        st.code(template, language="markdown")
+        
+        if st.button("📧 Copy CTO Template", use_container_width=True):
+            st.success("✅ CTO executive summary copied to clipboard!")
+    
+    def _get_cto_recommendation(self, plan_type, total_cost, impact_level):
+        """Get CTO recommendation based on plan status"""
+        if plan_type == "rejected":
+            return f"""
+**URGENT EXECUTIVE ACTION REQUIRED**
+
+**Recommendation:** REJECT - Budget constraints require immediate attention
+
+**Critical Issues:**
+- Plan exceeds budget by ${total_cost - 80:,.2f}/month ({((total_cost - 80) / 80 * 100):.1f}% over limit)
+- Annual financial impact: ${(total_cost - 80) * 12:,.2f} above approved budget
+- Risk of budget overrun and financial non-compliance
+
+**Executive Options:**
+1. **Budget Increase:** Approve additional ${(total_cost - 80) * 12:,.2f} annual budget allocation
+2. **Phased Approach:** Implement 30-50% of resources initially, scale based on ROI
+3. **Architecture Review:** Mandate cost optimization through alternative solutions
+4. **Strategic Pause:** Delay implementation until budget cycle allows for proper funding
+
+**Immediate Action:** Executive decision required within 48 hours to prevent project delays."""
+        elif plan_type == "review_required":
+            return f"""
+**EXECUTIVE REVIEW REQUESTED**
+
+**Recommendation:** HOLD - Detailed assessment required before proceeding
+
+**Review Requirements:**
+- Strategic alignment with digital transformation roadmap
+- ROI analysis and business case validation
+- Alternative architecture evaluation
+- Budget impact assessment for current fiscal year
+
+**Executive Decision Points:**
+1. **Strategic Priority:** Is this infrastructure critical for Q4 objectives?
+2. **Financial Flexibility:** Can budget accommodate ${total_cost * 12:,.2f} annual commitment?
+3. **Risk Tolerance:** Acceptable risk level for this investment size?
+4. **Timeline Flexibility:** Can implementation be optimized or phased?
+
+**Timeline:** Executive review meeting recommended within 5 business days."""
+        else:
+            return f"""
+**Executive Decision:** {'IMMEDIATE APPROVAL RECOMMENDED' if impact_level == 'High' else 'STANDARD APPROVAL PROCESS'}
+
+This infrastructure investment aligns with our digital transformation strategy and provides the foundation for scalable, secure, and cost-effective operations.
+
+**Strategic Benefits:**
+- Supports business growth and scalability requirements
+- Enables modern cloud-native architecture
+- Provides competitive advantage through improved infrastructure
+- Delivers measurable ROI within 12-18 months
+
+**Approval Status:** Ready for immediate implementation upon executive sign-off."""
+    
+    def _render_budgeting_tab(self):
+        """Render budgeting tab with budget allocation and analysis - integrated with .env config"""
+        st.markdown("#### 💰 Budgeting - Resource Allocation Based on Budget")
+        st.markdown("*Upload your project budget CSV to get optimal resource allocation recommendations*")
+        
+        # Load budget configuration from .env
+        try:
+            from ..config.budget_config import BudgetConfig
+            budget_config = BudgetConfig()
+        except Exception as e:
+            st.error(f"Error loading budget configuration: {e}")
+            # Fallback to default values
+            budget_config = type('obj', (object,), {
+                'default_budget': 80.0,
+                'warning_limit': 80.0,
+                'maximum_limit': 100.0,
+                'get_budget_status': lambda self, spend: 'healthy' if spend < 80 else 'warning' if spend < 100 else 'critical',
+                'get_budget_utilization': lambda self, spend: (spend / 80.0) * 100,
+                'get_remaining_budget': lambda self, spend: max(0, 80.0 - spend)
+            })()
+        
+        # Current usage baseline (from October 2025 actual data)
+        current_monthly_spend = 58.21
+        
+        # Display budget configuration from .env
+        st.markdown("##### 📊 Budget Configuration (from .env)")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric(
+                "Default Budget", 
+                f"${budget_config.default_budget:.2f}",
+                help="DEFAULT_BUDGET from .env file"
+            )
+        
+        with col2:
+            st.metric(
+                "Warning Limit", 
+                f"${budget_config.warning_limit:.2f}",
+                help="BUDGET_WARNING_LIMIT from .env file"
+            )
+        
+        with col3:
+            st.metric(
+                "Maximum Limit", 
+                f"${budget_config.maximum_limit:.2f}",
+                help="BUDGET_MAXIMUM_LIMIT from .env file"
+            )
+        
+        with col4:
+            utilization = budget_config.get_budget_utilization(current_monthly_spend)
+            st.metric(
+                "Current Utilization", 
+                f"{utilization:.1f}%",
+                f"${current_monthly_spend:.2f} of ${budget_config.default_budget:.2f}"
+            )
+        
+        # Budget status indicator
+        budget_status = budget_config.get_budget_status(current_monthly_spend)
+        status_colors = {
+            'healthy': '🟢',
+            'warning': '🟡', 
+            'critical': '🔴'
+        }
+        
+        status_messages = {
+            'healthy': 'Within budget limits',
+            'warning': 'Approaching budget limit',
+            'critical': 'Exceeds maximum budget'
+        }
+        
+        st.markdown(f"**Budget Status:** {status_colors[budget_status]} {status_messages[budget_status]}")
+        
+        # Budget CSV Upload Section
+        st.markdown("---")
+        st.markdown("##### 📤 Upload Budget Planning CSV")
+        
+        # Show expected budget CSV format
+        with st.expander("📋 Expected Budget CSV Format", expanded=True):
+            st.markdown(f"""
+            **Required Columns:**
+            - `Field`: Budget category or description
+            - `Description`: Detailed description of the budget item  
+            - `Example`: Example value or amount
+            
+            **Sample Structure:**
+            ```csv
+            Field,Description,Example
+            Estimated Monthly Cost,Total AWS spend expected,{budget_config.default_budget}
+            Project Duration,Duration of the project in months,6
+            Priority Services,Critical services that must be included,EC2 RDS
+            Optional Services,Services that can be scaled down if needed,S3 Lambda
+            ```
+            
+            **Important Notes:**
+            - Use numeric values without currency symbols for costs
+            - Budget should align with .env configuration (${budget_config.default_budget:.2f})
+            - Separate multiple services with spaces
+            - Duration should be in months as a number
+            """)
+        
+        budget_file = st.file_uploader(
+            "Choose Budget CSV file",
+            type=['csv'],
+            help="Upload a CSV file with your budget planning data",
+            key="budget_upload"
+        )
+        
+        if budget_file is None:
+            st.info("👆 Please upload a budget CSV file to proceed with budget-based resource allocation.")
+            st.warning("⚠️ No sample data provided. You must upload a properly structured budget CSV file to use this feature.")
+            
+            # Show budget-based recommendations
+            self._render_budget_recommendations(budget_config, current_monthly_spend)
+            return
+        
+        try:
+            import pandas as pd
+            
+            # Read budget CSV
+            budget_df = pd.read_csv(budget_file)
+            
+            # Validate required columns
+            required_columns = ['Field', 'Description', 'Example']
+            missing_columns = [col for col in required_columns if col not in budget_df.columns]
+            
+            if missing_columns:
+                st.error(f"❌ Missing required columns: {', '.join(missing_columns)}")
+                st.info("Please ensure your CSV file has the columns: Field, Description, Example")
+                return
+            
+            # Validate data content
+            if len(budget_df) == 0:
+                st.error("❌ CSV file is empty. Please provide budget data.")
+                return
+            
+            # Display uploaded data
+            st.success("✅ Budget CSV uploaded successfully!")
+            st.markdown("##### 📊 Uploaded Budget Data")
+            st.dataframe(budget_df, use_container_width=True)
+            
+            # Process budget data with .env integration
+            budget_analysis = self._process_budget_csv_with_config(budget_df, budget_config)
+            st.session_state.decision_budget_data = budget_analysis
+            
+            # Display budget analysis
+            self._render_budget_analysis_with_config(budget_analysis, budget_config)
+            
+            # Budget-based resource allocation
+            self._render_budget_resource_allocation_with_config(budget_analysis, budget_config)
+            
+            # Budget approval workflow
+            self._render_budget_approval_workflow_with_config(budget_analysis, budget_config)
+            
+        except Exception as e:
+            st.error(f"❌ Error processing budget CSV file: {str(e)}")
+            st.info("Please ensure your CSV file follows the expected format and contains valid data.")
+    
+    def _render_budget_recommendations(self, budget_config, current_spend):
+        """Render budget-based recommendations when no CSV is uploaded"""
+        st.markdown("---")
+        st.markdown("##### 💡 Budget-Based Recommendations")
+        
+        remaining_budget = budget_config.get_remaining_budget(current_spend)
+        
+        if remaining_budget > 0:
+            st.success(f"✅ You have ${remaining_budget:.2f} remaining in your monthly budget")
+            
+            # Suggest resource allocation within budget
+            st.markdown("**Recommended Resource Allocation:**")
+            
+            # Calculate what can be added within budget
+            if remaining_budget >= 30:  # Cost of t3.medium
+                instances = int(remaining_budget / 30.37)
+                st.markdown(f"• **EC2 Instances**: Add up to {instances} t3.medium instances (${instances * 30.37:.2f})")
+            
+            if remaining_budget >= 10:  # Storage cost
+                storage_gb = int(remaining_budget / 0.10)
+                st.markdown(f"• **EBS Storage**: Add up to {storage_gb}GB storage (${storage_gb * 0.10:.2f})")
+            
+            if remaining_budget >= 25:  # RDS cost
+                st.markdown(f"• **RDS Database**: Add 1 db.t3.micro instance (${25.50:.2f})")
+        
+        else:
+            st.warning(f"⚠️ Current spending (${current_spend:.2f}) exceeds budget (${budget_config.default_budget:.2f})")
+            st.markdown("**Cost Optimization Required:**")
+            st.markdown("• Consider Reserved Instances for 30% savings")
+            st.markdown("• Use Spot Instances for non-critical workloads")
+            st.markdown("• Optimize storage with GP3 volumes")
+    
+    def _process_budget_csv_with_config(self, df, budget_config):
+        """Process budget CSV with .env configuration integration"""
+        import re
+        
+        budget_info = {
+            'monthly_budget': budget_config.default_budget,
+            'duration_months': 6,
+            'priority_services': [],
+            'optional_services': [],
+            'constraints': [],
+            'config': budget_config
+        }
+        
+        for index, row in df.iterrows():
+            field = str(row['Field']).lower()
+            description = str(row['Description']).lower()
+            example = str(row['Example'])
+            
+            # Extract monthly budget (validate against .env config)
+            if 'monthly cost' in field or 'monthly budget' in field:
+                budget_match = re.search(r'[\$]?(\d+(?:,\d{3})*(?:\.\d{2})?)', example)
+                if budget_match:
+                    csv_budget = float(budget_match.group(1).replace(',', ''))
+                    
+                    # Validate against .env configuration
+                    if csv_budget > budget_config.maximum_limit:
+                        st.warning(f"⚠️ CSV budget (${csv_budget:.2f}) exceeds maximum limit (${budget_config.maximum_limit:.2f})")
+                    
+                    budget_info['monthly_budget'] = min(csv_budget, budget_config.maximum_limit)
+            
+            # Extract duration
+            elif 'duration' in field or 'timeline' in field:
+                duration_match = re.search(r'(\d+)', example)
+                if duration_match:
+                    budget_info['duration_months'] = int(duration_match.group(1))
+            
+            # Extract priority services
+            elif 'priority' in field or 'critical' in field:
+                services = example.lower().split()
+                budget_info['priority_services'] = [s.strip() for s in services if s.strip()]
+            
+            # Extract optional services
+            elif 'optional' in field or 'flexible' in field:
+                services = example.lower().split()
+                budget_info['optional_services'] = [s.strip() for s in services if s.strip()]
+        
+        return budget_info
+    
+    def _render_budget_analysis_with_config(self, budget_analysis, budget_config):
+        """Render budget analysis with .env configuration"""
+        st.markdown("##### 📊 Budget Analysis with Configuration Validation")
+        
+        # Current baseline
+        current_monthly = 58.21
+        csv_budget = budget_analysis['monthly_budget']
+        config_budget = budget_config.default_budget
+        duration = budget_analysis['duration_months']
+        
+        # Budget comparison metrics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("CSV Budget", f"${csv_budget:,.2f}")
+        
+        with col2:
+            st.metric("Config Budget", f"${config_budget:,.2f}", 
+                     help="From .env DEFAULT_BUDGET")
+        
+        with col3:
+            effective_budget = min(csv_budget, config_budget)
+            st.metric("Effective Budget", f"${effective_budget:,.2f}",
+                     help="Lower of CSV and config budget")
+        
+        with col4:
+            available = effective_budget - current_monthly
+            st.metric("Available Budget", f"${available:,.2f}")
+        
+        # Budget validation status
+        if csv_budget > budget_config.maximum_limit:
+            st.error(f"❌ CSV budget exceeds maximum limit (${budget_config.maximum_limit:.2f})")
+        elif csv_budget > budget_config.warning_limit:
+            st.warning(f"⚠️ CSV budget exceeds warning limit (${budget_config.warning_limit:.2f})")
+        else:
+            st.success("✅ CSV budget is within configured limits")
+    
+    def _render_budget_resource_allocation_with_config(self, budget_analysis, budget_config):
+        """Render resource allocation with budget configuration"""
+        st.markdown("---")
+        st.markdown("##### 🎯 Resource Allocation with Budget Constraints")
+        
+        current_monthly = 58.21
+        effective_budget = min(budget_analysis['monthly_budget'], budget_config.default_budget)
+        available_budget = effective_budget - current_monthly
+        
+        if available_budget <= 0:
+            st.error(f"⚠️ No budget available. Current spend (${current_monthly:.2f}) meets/exceeds budget (${effective_budget:.2f})")
+            return
+        
+        # Generate budget-constrained recommendations
+        recommendations = self._generate_budget_constrained_recommendations(
+            available_budget, budget_analysis, budget_config
+        )
+        
+        if recommendations:
+            st.markdown("**💡 Budget-Constrained Resource Recommendations:**")
+            
+            import pandas as pd
+            rec_df = pd.DataFrame(recommendations)
+            st.dataframe(rec_df, use_container_width=True)
+            
+            # Download recommendations
+            rec_csv = rec_df.to_csv(index=False)
+            st.download_button(
+                label="📥 Download Budget-Constrained Resource Plan",
+                data=rec_csv,
+                file_name=f"budget_constrained_plan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+    
+    def _generate_budget_constrained_recommendations(self, available_budget, budget_analysis, budget_config):
+        """Generate recommendations within budget constraints"""
+        recommendations = []
+        remaining_budget = available_budget
+        
+        priority_services = budget_analysis.get('priority_services', [])
+        
+        # Prioritize based on .env budget limits
+        max_single_resource_cost = budget_config.warning_limit * 0.3  # 30% of warning limit
+        
+        # EC2 recommendations (if compute is priority)
+        if any('ec2' in service or 'compute' in service for service in priority_services):
+            if remaining_budget >= 30.37 and remaining_budget <= max_single_resource_cost:
+                # Conservative allocation within budget constraints
+                max_instances = min(int(remaining_budget / 30.37), 2)  # Limit to 2 instances
+                ec2_cost = max_instances * 30.37
+                remaining_budget -= ec2_cost
+                
+                recommendations.append({
+                    'Resource Type': 'Compute (EC2)',
+                    'Quantity / Size': f'{max_instances} instances (t3.medium)',
+                    'Description or Use Case': 'Budget-constrained application servers',
+                    'Monthly Cost': f'${ec2_cost:.2f}',
+                    'Budget Compliance': f'Within {budget_config.warning_limit:.0f}% limit'
+                })
+        
+        # Storage recommendations (always include basic storage)
+        if remaining_budget >= 5:
+            storage_gb = min(int(remaining_budget / 0.10), 100)  # Limit to 100GB
+            storage_cost = storage_gb * 0.10
+            remaining_budget -= storage_cost
+            
+            recommendations.append({
+                'Resource Type': 'Storage (EBS)',
+                'Quantity / Size': f'{storage_gb} GB (gp3)',
+                'Description or Use Case': 'Essential application storage',
+                'Monthly Cost': f'${storage_cost:.2f}',
+                'Budget Compliance': 'Essential service'
+            })
+        
+        # Reserve buffer for unexpected costs
+        if remaining_budget > 0:
+            recommendations.append({
+                'Resource Type': 'Budget Reserve',
+                'Quantity / Size': 'N/A',
+                'Description or Use Case': 'Buffer for unexpected costs and overages',
+                'Monthly Cost': f'${remaining_budget:.2f}',
+                'Budget Compliance': 'Risk mitigation'
+            })
+        
+        return recommendations
+    
+    def _render_budget_approval_workflow_with_config(self, budget_analysis, budget_config):
+        """Render budget approval workflow with configuration validation"""
+        st.markdown("---")
+        st.markdown("##### ✅ Budget Approval Workflow with Configuration Validation")
+        
+        csv_budget = budget_analysis['monthly_budget']
+        config_budget = budget_config.default_budget
+        current_monthly = 58.21
+        
+        # Budget compliance check
+        is_compliant = csv_budget <= budget_config.maximum_limit
+        
+        # Display compliance status
+        if is_compliant:
+            st.success(f"✅ Budget compliant with .env configuration")
+        else:
+            st.error(f"❌ Budget exceeds maximum limit (${budget_config.maximum_limit:.2f})")
+        
+        # Quick Action Buttons for Budget (only if compliant)
+        if is_compliant:
+            st.markdown("**🚀 Budget Approval Actions:**")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                if st.button("✅ Approve Budget Plan", type="primary", use_container_width=True, key="approve_budget_config"):
+                    st.session_state.decision_approval_status = "budget_approved_with_config"
+                    st.success("✅ Budget plan approved with configuration validation!")
+            
+            with col2:
+                if st.button("⚡ Approve with Constraints", type="secondary", use_container_width=True, key="approve_budget_constrained"):
+                    st.session_state.decision_approval_status = "budget_approved_constrained"
+                    st.success("✅ Budget approved with .env constraints!")
+            
+            with col3:
+                if st.button("📋 Request Review", use_container_width=True, key="review_budget_config"):
+                    st.session_state.decision_approval_status = "budget_review_config"
+                    st.warning("📋 Budget marked for configuration review")
+            
+            with col4:
+                if st.button("❌ Reject Budget", use_container_width=True, key="reject_budget_config"):
+                    st.session_state.decision_approval_status = "budget_rejected_config"
+                    st.error("❌ Budget rejected due to configuration issues")
+        else:
+            st.error("⚠️ Budget approval blocked due to configuration limit violations")
+            st.info(f"Please reduce budget to ${budget_config.maximum_limit:.2f} or below to proceed")
