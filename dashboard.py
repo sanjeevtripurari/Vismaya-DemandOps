@@ -22,14 +22,11 @@ def main():
         from src.ui.enhanced_dashboard import EnhancedDashboard
         from src.application.dependency_injection import DependencyContainer
         
-        st.info("🔄 Initializing Vismaya Dashboard...")
-        
         # Initialize container
         container = DependencyContainer(Config)
         
         try:
             container.initialize()
-            st.success("✅ Container initialized successfully")
         except Exception as e:
             st.error(f"❌ Container initialization failed: {e}")
             st.warning("🔄 Running in demo mode with mock data")

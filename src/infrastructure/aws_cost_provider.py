@@ -257,7 +257,13 @@ class AWSCostProvider(ICostDataProvider):
                 raise Exception("AWS Cost Explorer not accessible for trend data")
             
             end_date = datetime.now()
-            start_date = end_date - timedelta(days=months * 30)
+            # Proper month calculation for start date
+            year = end_date.year
+            month = end_date.month - months
+            while month <= 0:
+                year -= 1
+                month += 12
+            start_date = datetime(year, month, 1)
             
             logger.info(f"Fetching real AWS monthly trend from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
             

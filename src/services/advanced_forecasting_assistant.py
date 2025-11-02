@@ -576,42 +576,57 @@ class AdvancedForecastingAssistant:
             timeline_data = []
             cumulative_data = []
             
-            # Current baseline
+            # Current baseline (6 months history with proper month calculation)
+            current_date = datetime.now()
             for i in range(6):  # 6 months history
-                month_date = datetime.now() - timedelta(days=(6-i) * 30)
+                # Proper month calculation for history
+                year = current_date.year
+                month = current_date.month - (6 - i)
+                while month <= 0:
+                    year -= 1
+                    month += 12
+                
+                month_date = datetime(year, month, 1)
                 timeline_data.append({
                     'month': month_date.strftime('%b %Y'),
-                    'current_cost': current_monthly,
-                    'with_new_resources': current_monthly,
+                    'current_cost': round(current_monthly, 2),
+                    'with_new_resources': round(current_monthly, 2),
                     'new_resources_only': 0
                 })
             
-            # Future with new resources
+            # Future with new resources (proper month calculation)
             cumulative_new_cost = 0
             for i in range(duration_months):
-                month_date = datetime.now() + timedelta(days=(i+1) * 30)
+                # Proper month calculation for future
+                year = current_date.year
+                month = current_date.month + (i + 1)
+                while month > 12:
+                    year += 1
+                    month -= 12
+                
+                month_date = datetime(year, month, 1)
                 cumulative_new_cost += requested_monthly
                 
                 timeline_data.append({
                     'month': month_date.strftime('%b %Y'),
-                    'current_cost': current_monthly,
-                    'with_new_resources': current_monthly + requested_monthly,
-                    'new_resources_only': requested_monthly
+                    'current_cost': round(current_monthly, 2),
+                    'with_new_resources': round(current_monthly + requested_monthly, 2),
+                    'new_resources_only': round(requested_monthly, 2)
                 })
                 
                 cumulative_data.append({
                     'month': month_date.strftime('%b %Y'),
-                    'cumulative_cost': cumulative_new_cost,
-                    'monthly_cost': requested_monthly
+                    'cumulative_cost': round(cumulative_new_cost, 2),
+                    'monthly_cost': round(requested_monthly, 2)
                 })
             
             return {
                 'timeline_data': timeline_data,
                 'cumulative_data': cumulative_data,
                 'summary': {
-                    'current_monthly': current_monthly,
-                    'requested_monthly': requested_monthly,
-                    'total_new_cost': cost_analysis.get('total_cost', 0),
+                    'current_monthly': round(current_monthly, 2),
+                    'requested_monthly': round(requested_monthly, 2),
+                    'total_new_cost': round(cost_analysis.get('total_cost', 0), 2),
                     'duration_months': duration_months
                 }
             }

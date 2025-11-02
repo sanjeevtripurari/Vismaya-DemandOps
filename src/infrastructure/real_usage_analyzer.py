@@ -105,11 +105,22 @@ class RealUsageAnalyzer(ICostDataProvider):
             growth_factors = [0.6, 0.7, 0.8, 0.9, 0.95, 1.0]  # Gradual growth to current
             
             for i in range(months):
-                month_start = end_date - timedelta(days=(months - i) * 30)
-                month_end = month_start + timedelta(days=30)
+                # Proper month calculation
+                year = end_date.year
+                month = end_date.month - (months - i - 1)
+                while month <= 0:
+                    year -= 1
+                    month += 12
+                
+                month_start = datetime(year, month, 1)
+                # Calculate month end
+                if month == 12:
+                    month_end = datetime(year + 1, 1, 1) - timedelta(days=1)
+                else:
+                    month_end = datetime(year, month + 1, 1) - timedelta(days=1)
                 
                 factor = growth_factors[i] if i < len(growth_factors) else 1.0
-                amount = current_cost * factor
+                amount = round(current_cost * factor, 2)
                 
                 trend_data.append(CostData(
                     amount=amount,

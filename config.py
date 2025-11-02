@@ -1,6 +1,7 @@
 import os
 from dotenv import load_dotenv
 
+# Load .env file initially
 load_dotenv()
 
 class Config:
@@ -43,6 +44,29 @@ class Config:
     @classmethod
     def is_production(cls):
         return cls.ENVIRONMENT.lower() == 'production'
+    
+    @classmethod
+    def reload_config(cls):
+        """Reload configuration from .env file"""
+        # Force reload of .env file
+        load_dotenv(override=True)
+        
+        # Reload all budget configuration values
+        cls.DEFAULT_BUDGET = int(os.getenv('DEFAULT_BUDGET', 80))
+        cls.BUDGET_WARNING_LIMIT = int(os.getenv('BUDGET_WARNING_LIMIT', 80))
+        cls.BUDGET_MAXIMUM_LIMIT = int(os.getenv('BUDGET_MAXIMUM_LIMIT', 100))
+        
+        # Reload other configurations as needed
+        cls.AWS_REGION = os.getenv('AWS_REGION', 'us-east-2')
+        cls.DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
+        
+        return cls
+    
+    @classmethod
+    def get_fresh_config(cls):
+        """Get a fresh configuration instance with reloaded values"""
+        cls.reload_config()
+        return cls
     
     @classmethod
     def use_sso(cls):

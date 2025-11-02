@@ -147,10 +147,21 @@ class AgenticCostProvider(ICostDataProvider):
             end_date = datetime.now()
             
             for i in range(months):
-                month_start = end_date - timedelta(days=(months - i) * 30)
-                month_end = month_start + timedelta(days=30)
+                # Proper month calculation
+                year = end_date.year
+                month = end_date.month - (months - i - 1)
+                while month <= 0:
+                    year -= 1
+                    month += 12
                 
-                cost_amount = base_costs[i] if i < len(base_costs) else current_cost
+                month_start = datetime(year, month, 1)
+                # Calculate month end
+                if month == 12:
+                    month_end = datetime(year + 1, 1, 1) - timedelta(days=1)
+                else:
+                    month_end = datetime(year, month + 1, 1) - timedelta(days=1)
+                
+                cost_amount = round(base_costs[i] if i < len(base_costs) else current_cost, 2)
                 
                 trend_data.append(CostData(
                     amount=cost_amount,
@@ -320,10 +331,21 @@ class RealisticCostProvider(ICostDataProvider):
         end_date = datetime.now()
         
         for i in range(months):
-            month_start = end_date - timedelta(days=(months - i) * 30)
-            month_end = month_start + timedelta(days=30)
+            # Proper month calculation
+            year = end_date.year
+            month = end_date.month - (months - i - 1)
+            while month <= 0:
+                year -= 1
+                month += 12
             
-            amount = base_amounts[i] if i < len(base_amounts) else 33.47
+            month_start = datetime(year, month, 1)
+            # Calculate month end
+            if month == 12:
+                month_end = datetime(year + 1, 1, 1) - timedelta(days=1)
+            else:
+                month_end = datetime(year, month + 1, 1) - timedelta(days=1)
+            
+            amount = round(base_amounts[i] if i < len(base_amounts) else 33.47, 2)
             
             trend_data.append(CostData(
                 amount=amount,

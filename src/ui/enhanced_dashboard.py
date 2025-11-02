@@ -34,6 +34,9 @@ class EnhancedDashboard:
         if 'dashboard_mode' not in st.session_state:
             st.session_state.dashboard_mode = 'overview'  # overview, decisions, forecasting, settings
         
+        # Force refresh budget config from .env file on initialization
+        self._refresh_budget_config_from_env()
+        
         if 'ui_theme' not in st.session_state:
             st.session_state.ui_theme = 'modern'  # modern, classic, dark
         
@@ -47,7 +50,39 @@ class EnhancedDashboard:
             st.session_state.notification_preferences = {
                 'budget_alerts': True,
                 'decision_updates': True,
-                'cost_anomalies': True
+                'cost_anomalies': True,
+                'optimization_tips': True
+            }
+    
+    def _refresh_budget_config_from_env(self):
+        """Force refresh budget configuration from .env file"""
+        try:
+            from config import Config
+            from datetime import datetime
+            
+            # Get fresh config values
+            config = Config.get_fresh_config()
+            
+            # Update session state with current .env values
+            st.session_state.budget_config = {
+                'default_budget': config.DEFAULT_BUDGET,
+                'warning_limit': config.BUDGET_WARNING_LIMIT,
+                'maximum_limit': config.BUDGET_MAXIMUM_LIMIT,
+                'last_updated': datetime.now().strftime('%H:%M:%S')
+            }
+            
+            # Update .env file modification time
+            import os
+            if os.path.exists('.env'):
+                st.session_state.env_file_mtime = os.path.getmtime('.env')
+                
+        except Exception as e:
+            # If there's an error, use default values
+            st.session_state.budget_config = {
+                'default_budget': 80,
+                'warning_limit': 80,
+                'maximum_limit': 100,
+                'last_updated': 'Error loading'
             }
     
     def render_enhanced_dashboard(self):
@@ -119,7 +154,7 @@ class EnhancedDashboard:
             # Pending decisions
             pending_count = len([d for d in st.session_state.get('decisions', []) if d.get('status') == 'pending'])
             decision_color = "🔴" if pending_count > 5 else "🟡" if pending_count > 0 else "🟢"
-            st.markdown(f"{decision_color} **Decisions:** {pending_count} pending")
+            st.markdown(f"{decision_color} **Demands:** {pending_count} pending")
         
         with col4:
             # Budget status
@@ -138,7 +173,7 @@ class EnhancedDashboard:
         nav_options = {
             'overview': {'label': '📊 Overview', 'icon': '📊'},
             'current_usage': {'label': '💰 Current Usage', 'icon': '💰'},
-            'decisions': {'label': '⚖️ Decisions', 'icon': '⚖️'},
+            'decisions': {'label': '⚖️ Demands', 'icon': '⚖️'},
             'forecasting': {'label': '🔮 Forecasting', 'icon': '🔮'},
             'settings': {'label': '⚙️ Settings', 'icon': '⚙️'}
         }
@@ -193,9 +228,6 @@ class EnhancedDashboard:
         
         # Cost trends and charts
         self._render_cost_overview_charts()
-        
-        # Recent decisions summary
-        self._render_recent_decisions_summary()
     
     def _render_current_usage_dashboard(self):
         """Render current usage dashboard with three sub-tabs"""
@@ -220,8 +252,8 @@ class EnhancedDashboard:
     
     def _render_decisions_dashboard(self):
         """Render decisions dashboard with resource planning and budgeting"""
-        st.markdown("### ⚖️ Resource Planning & Budget Decisions")
-        st.markdown("*Upload resource plans, analyze costs, and make informed decisions with approval workflows*")
+        st.markdown("### ⚖️ Resource Planning & Budget Demands")
+        st.markdown("*Upload resource plans, analyze costs, and manage resource demands with approval workflows*")
         
         # Initialize session state for decisions
         if 'decision_resource_data' not in st.session_state:
@@ -581,6 +613,10 @@ class EnhancedDashboard:
                 'content': self._render_preference_settings
             },
             {
+                'label': '💰 Budget Config',
+                'content': self._render_budget_config_settings
+            },
+            {
                 'label': '📊 Data Sources',
                 'content': self._render_data_source_settings
             }
@@ -696,8 +732,8 @@ class EnhancedDashboard:
         # Calculate key metrics using .env configuration
         current_spend = usage_summary.budget_info.current_spend
         
-        # Use .env configuration values
-        config = Config()
+        # Use .env configuration values (force fresh reload)
+        config = Config.get_fresh_config()
         budget_limit = config.BUDGET_WARNING_LIMIT
         budget_utilization = (current_spend / budget_limit) * 100 if budget_limit > 0 else 0
         forecast_amount = usage_summary.cost_forecast.forecasted_amount if usage_summary.cost_forecast else current_spend
@@ -732,7 +768,7 @@ class EnhancedDashboard:
                 'color': 'primary'
             },
             {
-                'label': 'Pending Decisions',
+                'label': 'Pending Demands',
                 'value': str(pending_decisions),
                 'icon': '⚖️',
                 'delta': "require approval" if pending_decisions > 0 else "all processed",
@@ -766,11 +802,24 @@ class EnhancedDashboard:
         usage_summary = st.session_state.usage_summary
         current_spend = usage_summary.budget_info.current_spend
         
-        # Use .env configuration values
-        config = Config()
-        default_budget = config.DEFAULT_BUDGET
-        warning_limit = config.BUDGET_WARNING_LIMIT
-        maximum_limit = config.BUDGET_MAXIMUM_LIMIT
+        # Show current .env values being used
+        if 'budget_config' in st.session_state:
+            config_info = st.session_state.budget_config
+            st.caption(f"📋 Using .env values: Budget=${config_info['default_budget']}, Warning=${config_info['warning_limit']}, Max=${config_info['maximum_limit']}")
+        
+        # Use .env configuration values - check session state first for dynamic updates
+        if 'budget_config' in st.session_state:
+            # Use updated values from session state
+            session_config = st.session_state.budget_config
+            default_budget = session_config['default_budget']
+            warning_limit = session_config['warning_limit']
+            maximum_limit = session_config['maximum_limit']
+        else:
+            # Load from config.py as fallback (force fresh reload)
+            config = Config.get_fresh_config()
+            default_budget = config.DEFAULT_BUDGET
+            warning_limit = config.BUDGET_WARNING_LIMIT
+            maximum_limit = config.BUDGET_MAXIMUM_LIMIT
         
         # Calculate utilization percentages
         budget_utilization = (current_spend / default_budget) * 100 if default_budget > 0 else 0
@@ -895,31 +944,7 @@ class EnhancedDashboard:
             "🥧"
         )
     
-    def _render_recent_decisions_summary(self):
-        """Render recent decisions summary"""
-        recent_decisions = st.session_state.get('decisions', [])[:3]  # Last 3 decisions
-        
-        if not recent_decisions:
-            self.modern_dashboard.render_status_card(
-                "Recent Decisions",
-                "healthy",
-                ["No recent decisions", "System is running smoothly"],
-                "✅"
-            )
-            return
-        
-        decision_details = []
-        for decision in recent_decisions:
-            status_emoji = {"pending": "⏳", "approved": "✅", "rejected": "❌"}.get(decision.get('status', 'pending'), "⏳")
-            decision_details.append(f"{status_emoji} {decision.get('title', 'Untitled')} - ${decision.get('cost_impact', 0):.2f}")
-        
-        self.modern_dashboard.render_status_card(
-            "Recent Decisions",
-            "warning" if any(d.get('status') == 'pending' for d in recent_decisions) else "healthy",
-            decision_details,
-            "⚖️"
-        )
-    
+
     def _render_quick_actions_panel(self):
         """Render quick actions panel"""
         st.markdown("#### ⚡ Quick Actions")
@@ -1126,8 +1151,8 @@ class EnhancedDashboard:
         usage_summary = st.session_state.usage_summary
         current_spend = usage_summary.budget_info.current_spend
         
-        # Use .env configuration values
-        config = Config()
+        # Use .env configuration values (force fresh reload)
+        config = Config.get_fresh_config()
         warning_limit = config.BUDGET_WARNING_LIMIT
         maximum_limit = config.BUDGET_MAXIMUM_LIMIT
         
@@ -1242,12 +1267,196 @@ class EnhancedDashboard:
         # Default dashboard view
         default_view = st.selectbox(
             "Default Dashboard View:",
-            ["overview", "decisions", "analytics", "forecasting"],
+            ["overview", "demands", "analytics", "forecasting"],
             index=0
         )
         
         if st.button("Save Preferences"):
             st.success("Preferences saved!")
+    
+    def _render_budget_config_settings(self):
+        """Render budget configuration settings with .env file updates"""
+        st.markdown("#### 💰 Budget Configuration")
+        st.markdown("*Configure budget limits and thresholds. Changes will be saved to .env file.*")
+        
+        # Information about budget settings
+        with st.expander("ℹ️ Budget Settings Information"):
+            st.markdown("""
+            **Budget Configuration Explained:**
+            
+            - **Default Budget**: The baseline budget amount used for calculations and comparisons
+            - **Warning Limit**: When costs reach this amount, warning alerts are triggered (🟡 Yellow status)
+            - **Maximum Limit**: Hard limit that triggers critical alerts (🔴 Red status)
+            
+            **Usage in System:**
+            - Budget monitoring widget uses these values for status colors
+            - CSV resource planning validates against these limits
+            - Email templates include budget impact analysis
+            - Optimization recommendations are budget-aware
+            """)
+        
+        # Load current config values (force fresh reload)
+        from config import Config
+        config = Config.get_fresh_config()
+        
+        # Initialize session state for budget config if not exists
+        if 'budget_config' not in st.session_state:
+            st.session_state.budget_config = {
+                'default_budget': config.DEFAULT_BUDGET,
+                'warning_limit': config.BUDGET_WARNING_LIMIT,
+                'maximum_limit': config.BUDGET_MAXIMUM_LIMIT
+            }
+        
+        # Budget configuration form
+        with st.form("budget_config_form"):
+            st.markdown("##### Budget Limits")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                default_budget = st.number_input(
+                    "Default Budget ($)",
+                    min_value=1,
+                    max_value=10000,
+                    value=st.session_state.budget_config['default_budget'],
+                    step=10,
+                    help="Default budget threshold for warnings"
+                )
+                
+                warning_limit = st.number_input(
+                    "Warning Limit ($)",
+                    min_value=1,
+                    max_value=10000,
+                    value=st.session_state.budget_config['warning_limit'],
+                    step=10,
+                    help="Budget limit at which warnings are triggered"
+                )
+            
+            with col2:
+                maximum_limit = st.number_input(
+                    "Maximum Limit ($)",
+                    min_value=1,
+                    max_value=10000,
+                    value=st.session_state.budget_config['maximum_limit'],
+                    step=10,
+                    help="Hard budget limit - critical alerts triggered"
+                )
+                
+                # Validation
+                if warning_limit > maximum_limit:
+                    st.error("⚠️ Warning limit cannot be greater than maximum limit")
+                elif default_budget > maximum_limit:
+                    st.error("⚠️ Default budget cannot be greater than maximum limit")
+            
+            # Current status display
+            st.markdown("##### Current Configuration")
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric("Default Budget", f"${default_budget}")
+            with col2:
+                st.metric("Warning Limit", f"${warning_limit}")
+            with col3:
+                st.metric("Maximum Limit", f"${maximum_limit}")
+            
+            # Preview .env changes
+            st.markdown("##### .env File Preview")
+            env_preview = f"""```bash
+# Budget Configuration
+DEFAULT_BUDGET={default_budget}
+BUDGET_WARNING_LIMIT={warning_limit}
+BUDGET_MAXIMUM_LIMIT={maximum_limit}
+```"""
+            st.markdown(env_preview)
+            
+            # Submit button
+            submitted = st.form_submit_button("💾 Save Budget Configuration", type="primary")
+            
+            if submitted:
+                if warning_limit <= maximum_limit and default_budget <= maximum_limit:
+                    # Update session state
+                    st.session_state.budget_config = {
+                        'default_budget': default_budget,
+                        'warning_limit': warning_limit,
+                        'maximum_limit': maximum_limit
+                    }
+                    
+                    # Update .env file
+                    success = self._update_env_file({
+                        'DEFAULT_BUDGET': str(default_budget),
+                        'BUDGET_WARNING_LIMIT': str(warning_limit),
+                        'BUDGET_MAXIMUM_LIMIT': str(maximum_limit)
+                    })
+                    
+                    if success:
+                        # Set flags to indicate budget config was updated
+                        st.session_state.budget_config_updated = True
+                        st.session_state.settings_to_budgeting_notification = True
+                        
+                        # Update session state immediately with new values
+                        from datetime import datetime
+                        st.session_state.budget_config = {
+                            'default_budget': default_budget,
+                            'warning_limit': warning_limit,
+                            'maximum_limit': maximum_limit,
+                            'last_updated': datetime.now().strftime('%H:%M:%S')
+                        }
+                        
+                        # Also update .env file modification time to trigger refresh in other tabs
+                        import os
+                        if os.path.exists('.env'):
+                            st.session_state.env_file_mtime = os.path.getmtime('.env')
+                        
+                        st.success("✅ Budget configuration saved to .env file!")
+                        st.success("🔄 Budget values updated immediately in all tabs!")
+                        st.info("💡 Changes are active now. Visit Demands → Budgeting tab to see updated values.")
+                        
+                        # Force immediate update of all budget-related displays
+                        import time
+                        time.sleep(0.5)  # Brief pause to show success message
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to update .env file. Please check file permissions.")
+                else:
+                    st.error("❌ Please fix validation errors before saving.")
+    
+    def _update_env_file(self, updates):
+        """Update .env file with new values"""
+        try:
+            import os
+            
+            env_file_path = '.env'
+            
+            # Read current .env file
+            env_lines = []
+            if os.path.exists(env_file_path):
+                with open(env_file_path, 'r') as f:
+                    env_lines = f.readlines()
+            
+            # Update or add new values
+            updated_keys = set()
+            for i, line in enumerate(env_lines):
+                line = line.strip()
+                if '=' in line and not line.startswith('#'):
+                    key = line.split('=')[0].strip()
+                    if key in updates:
+                        env_lines[i] = f"{key}={updates[key]}\n"
+                        updated_keys.add(key)
+            
+            # Add new keys that weren't found
+            for key, value in updates.items():
+                if key not in updated_keys:
+                    env_lines.append(f"{key}={value}\n")
+            
+            # Write back to .env file
+            with open(env_file_path, 'w') as f:
+                f.writelines(env_lines)
+            
+            return True
+            
+        except Exception as e:
+            st.error(f"Error updating .env file: {str(e)}")
+            return False
     
     def _render_data_source_settings(self):
         """Render data source settings"""
@@ -2509,7 +2718,13 @@ class EnhancedDashboard:
                 return f"~{items:,} configuration items | Compliance rules"
         
         else:
-            return "Usage details not available"
+            # Provide generic but useful details for unknown services
+            if cost < 0.01:
+                return f"{service_name} | Minimal usage"
+            elif cost < 1.00:
+                return f"{service_name} | Light usage | ${cost:.3f}/month"
+            else:
+                return f"{service_name} | Active usage | ${cost:.2f}/month"
     
     def _render_detailed_billing_summary(self, usage_summary):
         """Render detailed billing summary matching current summary"""
@@ -2562,50 +2777,67 @@ class EnhancedDashboard:
         # Build comprehensive resource breakdown
         resource_breakdown = []
         
-        # EC2 Instances
+        # EC2 Instances (only include instances with valid data)
         for instance in usage_summary.ec2_instances:
-            resource_breakdown.append({
-                'Resource Type': 'EC2 Instance',
-                'Resource Name': instance.name or instance.instance_id,
-                'Resource ID': instance.instance_id,
-                'Instance Type': instance.instance_type,
-                'Status': instance.state.value.title(),
-                'Monthly Cost': f'${instance.monthly_cost:.2f}',
-                'Daily Cost': f'${instance.monthly_cost/30:.3f}',
-                'Hourly Cost': f'${instance.monthly_cost/30/24:.4f}',
-                'Cost Breakdown': f't2.micro On-Demand: ${instance.monthly_cost:.2f}/month',
-                'Usage Details': f'Running 24/7 | {instance.instance_type} | {instance.state.value}',
-                'Tags': ', '.join([f'{k}:{v}' for k, v in instance.tags.items()]) if instance.tags else 'None'
-            })
+            if instance.monthly_cost > 0 and instance.instance_id:
+                resource_name = instance.name or f"Instance-{instance.instance_id[-8:]}"
+                instance_type = instance.instance_type or "Unknown"
+                status = instance.state.value.title() if instance.state else "Unknown"
+                
+                resource_breakdown.append({
+                    'Resource Type': 'EC2 Instance',
+                    'Resource Name': resource_name,
+                    'Resource ID': instance.instance_id,
+                    'Instance Type': instance_type,
+                    'Status': status,
+                    'Monthly Cost': f'${instance.monthly_cost:.2f}',
+                    'Daily Cost': f'${instance.monthly_cost/30:.3f}',
+                    'Hourly Cost': f'${instance.monthly_cost/30/24:.4f}',
+                    'Cost Breakdown': f'{instance_type} On-Demand: ${instance.monthly_cost:.2f}/month',
+                    'Usage Details': f'Running 24/7 | {instance_type} | {status}',
+                    'Tags': ', '.join([f'{k}:{v}' for k, v in instance.tags.items()]) if instance.tags else 'None'
+                })
         
-        # EBS Volumes
+        # EBS Volumes (only include volumes with valid data)
         for volume in usage_summary.storage_volumes:
-            resource_breakdown.append({
-                'Resource Type': 'EBS Volume',
-                'Resource Name': volume.volume_id,
-                'Resource ID': volume.volume_id,
-                'Instance Type': f'{volume.size_gb}GB {volume.volume_type}',
-                'Status': 'Attached' if volume.attached_instance else 'Available',
-                'Monthly Cost': f'${volume.monthly_cost:.2f}',
-                'Daily Cost': f'${volume.monthly_cost/30:.3f}',
-                'Hourly Cost': f'${volume.monthly_cost/30/24:.4f}',
-                'Cost Breakdown': f'{volume.volume_type} Storage: ${volume.monthly_cost:.2f}/month',
-                'Usage Details': f'{volume.size_gb}GB {volume.volume_type} | Attached to {volume.attached_instance or "None"}',
-                'Tags': 'None'
-            })
+            if volume.monthly_cost > 0 and volume.volume_id:
+                volume_name = f"Volume-{volume.volume_id[-8:]}" if volume.volume_id else "Unknown Volume"
+                volume_type = volume.volume_type or "gp2"
+                size_gb = volume.size_gb or 0
+                
+                resource_breakdown.append({
+                    'Resource Type': 'EBS Volume',
+                    'Resource Name': volume_name,
+                    'Resource ID': volume.volume_id,
+                    'Instance Type': f'{size_gb}GB {volume_type}',
+                    'Status': 'Attached' if volume.attached_instance else 'Available',
+                    'Monthly Cost': f'${volume.monthly_cost:.2f}',
+                    'Daily Cost': f'${volume.monthly_cost/30:.3f}',
+                    'Hourly Cost': f'${volume.monthly_cost/30/24:.4f}',
+                    'Cost Breakdown': f'{volume_type} Storage: ${volume.monthly_cost:.2f}/month',
+                    'Usage Details': f'{size_gb}GB {volume_type} | Attached to {volume.attached_instance or "None"}',
+                    'Tags': 'None'
+                })
         
-        # Service Costs
+        # Service Costs (filter out very small costs to avoid clutter)
         for service_cost in usage_summary.service_costs:
-            if service_cost.cost.amount > 0:
-                service_name = getattr(service_cost.cost, 'service_name', service_cost.service_type.value)
-                clean_name = service_name.replace('Amazon ', '').replace('AWS ', '')
+            if service_cost.cost.amount > 0.001:  # Only show costs above $0.001
+                service_name = getattr(service_cost.cost, 'service_name', None)
+                if not service_name:
+                    service_name = getattr(service_cost, 'service_type', 'Unknown Service')
+                    if hasattr(service_name, 'value'):
+                        service_name = service_name.value
+                
+                clean_name = str(service_name).replace('Amazon ', '').replace('AWS ', '').strip()
+                if not clean_name:
+                    clean_name = "Unknown Service"
                 
                 usage_details = self._get_service_usage_details(service_name, service_cost.cost.amount)
                 
                 resource_breakdown.append({
                     'Resource Type': 'Service',
                     'Resource Name': clean_name,
-                    'Resource ID': service_name,
+                    'Resource ID': str(service_name),
                     'Instance Type': 'Service Usage',
                     'Status': 'Active',
                     'Monthly Cost': f'${service_cost.cost.amount:.3f}',
@@ -2619,24 +2851,35 @@ class EnhancedDashboard:
         if resource_breakdown:
             df = pd.DataFrame(resource_breakdown)
             
+            # Filter out any rows with missing or invalid data
+            df = df.dropna(subset=['Resource Name', 'Resource ID'])
+            df = df[df['Resource Name'].str.strip() != '']
+            df = df[df['Resource ID'].str.strip() != '']
+            
             # Sort by monthly cost (descending)
             df['Cost_Numeric'] = df['Monthly Cost'].str.replace('$', '').astype(float)
+            df = df[df['Cost_Numeric'] > 0]  # Remove zero-cost entries
             df = df.sort_values('Cost_Numeric', ascending=False).drop('Cost_Numeric', axis=1)
             
-            # Display with expandable details
-            st.dataframe(df, use_container_width=True, height=400)
-            
-            # Summary statistics
-            total_resources = len(df)
-            total_cost = sum(float(cost.replace('$', '')) for cost in df['Monthly Cost'])
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.info(f"📊 **Total Resources:** {total_resources}")
-            with col2:
-                st.info(f"💰 **Total Monthly Cost:** ${total_cost:.2f}")
-            with col3:
-                st.info(f"📅 **Average Daily Cost:** ${total_cost/30:.2f}")
+            if len(df) > 0:
+                # Display with expandable details
+                st.dataframe(df, use_container_width=True, height=400)
+                
+                # Summary statistics
+                total_resources = len(df)
+                total_cost = sum(float(cost.replace('$', '')) for cost in df['Monthly Cost'])
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.info(f"📊 **Total Resources:** {total_resources}")
+                with col2:
+                    st.info(f"💰 **Total Monthly Cost:** ${total_cost:.2f}")
+                with col3:
+                    st.info(f"📅 **Average Daily Cost:** ${total_cost/30:.2f}")
+            else:
+                st.info("📋 No resources with significant costs found. All resources may have minimal usage.")
+        else:
+            st.info("📋 No resource data available. Please check your AWS connection and permissions.")
     
     def _render_service_level_breakdown(self, usage_summary):
         """Render detailed service-level breakdown"""
@@ -2861,20 +3104,28 @@ class EnhancedDashboard:
         import plotly.graph_objects as go
         from datetime import datetime, timedelta
         
-        # Generate realistic resource forecast starting from October 2025
+        # Generate resource forecast using SAME logic as detailed breakdown table
         start_date = datetime(2025, 10, 1)  # Start from October 2025
         months = []
         ec2_instances = []
         storage_gb = []
-        database_instances = []
+        bedrock_workload = []
         
-        # Actual current values from October 2025 usage
-        current_ec2 = 1        # 1 EC2 instance ("web")
-        current_storage = 32   # 32 GB total storage (2 x 16GB volumes)
-        current_bedrock_usage = 1  # Bedrock AI service active
+        # Base values derived from current costs (consistent with detailed table)
+        # EC2: $56.00 / $30.37 per instance ≈ 1.84 instances, round to 2 for growth
+        base_ec2_instances = 2
+        # EBS: $1.60 / $0.10 per GB = 16 GB, but we show 32 GB total (2 volumes)
+        base_storage_gb = 32
+        # Bedrock: $0.30 represents 1 workload unit
+        base_bedrock_workload = 1
+        
+        # Use SAME growth rates as detailed breakdown table for consistency
+        ec2_growth_rate = 0.08       # 8% monthly (matches EC2 cost growth)
+        storage_growth_rate = 0.12   # 12% monthly (matches EBS cost growth)
+        bedrock_growth_rate = 0.25   # 25% monthly (matches Bedrock cost growth)
         
         for i in range(6):  # 6 months from October
-            # Use proper month calculation
+            # Use proper month calculation (same as other charts)
             year = start_date.year
             month = start_date.month + i
             if month > 12:
@@ -2883,23 +3134,27 @@ class EnhancedDashboard:
             month_date = datetime(year, month, 1)
             months.append(month_date.strftime("%b %Y"))
             
-            # Organic growth patterns based on actual current usage
-            # EC2: Start with 1 instance, may add more as workload grows
-            ec2_growth = 1.0
-            if i >= 2:  # Add second instance in month 3 (Dec)
-                ec2_growth = 2.0
-            if i >= 4:  # Add third instance in month 5 (Feb)
-                ec2_growth = 3.0
+            # Calculate resource growth using same exponential growth as cost calculations
+            # Add same variation as cost calculations for consistency
+            import random
+            random.seed(i * 42)  # Consistent seed
+            variation = 1 + (random.random() - 0.5) * 0.04  # Same ±2% variation
+            
+            # EC2: Gradual scaling based on cost growth (8% monthly)
+            ec2_factor = (1 + ec2_growth_rate) ** i * variation
+            ec2_count = max(1, int(base_ec2_instances * ec2_factor))
             
             # Storage: Steady growth with data accumulation (12% monthly)
-            storage_growth = (1.12) ** i  # 12% monthly compound growth
+            storage_factor = (1 + storage_growth_rate) ** i * variation
+            storage_count = int(base_storage_gb * storage_factor)
             
-            # Bedrock usage: Growing AI workload
-            bedrock_growth = (1.25) ** i  # 25% monthly growth in AI usage
+            # Bedrock: Growing AI workload (25% monthly)
+            bedrock_factor = (1 + bedrock_growth_rate) ** i * variation
+            bedrock_count = max(1, int(base_bedrock_workload * bedrock_factor))
             
-            ec2_instances.append(int(ec2_growth))
-            storage_gb.append(int(current_storage * storage_growth))
-            database_instances.append(int(current_bedrock_usage * bedrock_growth))  # Using bedrock as AI workload indicator
+            ec2_instances.append(ec2_count)
+            storage_gb.append(storage_count)
+            bedrock_workload.append(bedrock_count)
         
         fig = go.Figure()
         
@@ -2923,7 +3178,7 @@ class EnhancedDashboard:
         
         fig.add_trace(go.Scatter(
             x=months,
-            y=database_instances,
+            y=bedrock_workload,
             mode='lines+markers',
             name='AI Workload (Bedrock)',
             line=dict(color='#45B7D1', width=3),
@@ -2942,28 +3197,35 @@ class EnhancedDashboard:
         st.plotly_chart(fig, use_container_width=True)
     
     def _render_billing_forecast_chart(self):
-        """Render billing forecast chart"""
+        """Render billing forecast chart with budget limit line"""
         st.markdown("##### 💰 Billing Forecast")
         
         import plotly.graph_objects as go
         from datetime import datetime, timedelta
         
-        # Generate realistic billing forecast data starting from October 2025
+        # Load budget configuration from .env file
+        try:
+            from config import Config
+            config = Config.get_fresh_config()
+            budget_maximum_limit = config.BUDGET_MAXIMUM_LIMIT
+        except Exception as e:
+            # Fallback to default if config loading fails
+            budget_maximum_limit = 100.0
+        
+        # Generate billing forecast data using SAME logic as detailed breakdown table
         start_date = datetime(2025, 10, 1)  # Start from October 2025
         months = []
         monthly_costs = []
-        cumulative_costs = []
         
-        # Actual baseline monthly cost from October 2025 usage
-        baseline_cost = 58.21  # Total: EC2: 56.00 + EBS: 1.60 + Cost Explorer: 0.15 + Bedrock: 0.30 + Compute: 0.15 + Data Science: 0.01 + S3: 0.00
-        cumulative = 0
+        # Use SAME service costs and growth rates as detailed breakdown table
+        services = ['EC2', 'EBS Storage', 'Cost Explorer', 'Bedrock', 'Compute', 'Data Science', 'S3 Storage']
+        current_costs = [56.00, 1.60, 0.15, 0.30, 0.15, 0.01, 0.00]  # Same as table
         
-        # Actual service costs and growth rates from current usage
-        service_costs = [56.00, 1.60, 0.15, 0.30, 0.15, 0.01, 0.00]
-        service_growth_rates = [0.08, 0.12, 0.02, 0.25, 0.15, 0.20, 0.30]
+        # Same growth rates as detailed breakdown table
+        growth_rates = [0.08, 0.12, 0.02, 0.25, 0.15, 0.20, 0.30]
         
         for i in range(6):  # 6 months from October
-            # Use proper month calculation
+            # Use proper month calculation (same as table)
             year = start_date.year
             month = start_date.month + i
             if month > 12:
@@ -2972,19 +3234,21 @@ class EnhancedDashboard:
             month_date = datetime(year, month, 1)
             months.append(month_date.strftime("%b %Y"))
             
-            # Calculate total monthly cost with organic growth per service
+            # Calculate total monthly cost using SAME logic as table
             monthly_total = 0
-            for j, base_cost in enumerate(service_costs):
-                growth_factor = (1 + service_growth_rates[j]) ** i
-                # Add slight variation for realism
+            for j, base_cost in enumerate(current_costs):
+                service_growth_rate = growth_rates[j]
+                growth_factor = (1 + service_growth_rate) ** i
+                
+                # Same variation logic as table
                 import random
-                random.seed(i * j + 42)
-                variation = 1 + (random.random() - 0.5) * 0.04
-                monthly_total += base_cost * growth_factor * variation
+                random.seed(i * j + 42)  # Same seed for consistency
+                variation = 1 + (random.random() - 0.5) * 0.04  # Same ±2% variation
+                
+                cost = base_cost * growth_factor * variation
+                monthly_total += cost
             
             monthly_costs.append(monthly_total)
-            cumulative += monthly_total
-            cumulative_costs.append(cumulative)
         
         fig = go.Figure()
         
@@ -2993,34 +3257,93 @@ class EnhancedDashboard:
             y=monthly_costs,
             name='Monthly Cost',
             marker_color='#FF6B6B',
-            opacity=0.7
+            opacity=0.7,
+            text=[f'${cost:.2f}' for cost in monthly_costs],
+            textposition='auto'
         ))
         
+        # Add budget maximum limit line (dotted)
         fig.add_trace(go.Scatter(
             x=months,
-            y=[cost/10 for cost in cumulative_costs],  # Scale down for dual axis effect
-            mode='lines+markers',
-            name='Cumulative Cost (÷10)',
-            line=dict(color='#45B7D1', width=3),
-            marker=dict(size=8),
-            yaxis='y2'
+            y=[budget_maximum_limit] * len(months),
+            mode='lines',
+            name=f'Budget Limit (${budget_maximum_limit:.0f})',
+            line=dict(
+                color='#4A90E2',
+                width=3,
+                dash='dot'
+            ),
+            hovertemplate='<b>Budget Maximum Limit</b><br>' +
+                         'Month: %{x}<br>' +
+                         'Limit: $%{y:.2f}<extra></extra>'
         ))
         
         fig.update_layout(
             title="6-Month Billing Forecast",
             xaxis_title="Month",
             yaxis_title="Monthly Cost ($)",
-            yaxis2=dict(
-                title="Cumulative Cost (÷10)",
-                overlaying='y',
-                side='right'
-            ),
             height=400,
             showlegend=True,
-            hovermode='x unified'
+            hovermode='x unified',
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)'
         )
         
+        # Add grid for better readability
+        fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
+        fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
+        
         st.plotly_chart(fig, use_container_width=True)
+        
+        # Add forecast summary metrics with budget analysis
+        total_forecast = sum(monthly_costs)
+        avg_monthly = total_forecast / 6
+        baseline_cost = monthly_costs[0]  # First month is baseline
+        growth_from_baseline = ((monthly_costs[-1] / baseline_cost) - 1) * 100
+        
+        # Check if any month exceeds budget limit
+        months_over_budget = sum(1 for cost in monthly_costs if cost > budget_maximum_limit)
+        max_monthly_cost = max(monthly_costs)
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric(
+                "6-Month Total",
+                f"${total_forecast:.2f}",
+                f"${avg_monthly:.2f}/month avg"
+            )
+        
+        with col2:
+            st.metric(
+                "Final Month Cost",
+                f"${monthly_costs[-1]:.2f}",
+                f"+{growth_from_baseline:.1f}% from baseline"
+            )
+        
+        with col3:
+            st.metric(
+                "Budget Status",
+                f"${budget_maximum_limit:.0f} limit",
+                f"{months_over_budget} months over" if months_over_budget > 0 else "Within limits"
+            )
+        
+        with col4:
+            budget_utilization = (max_monthly_cost / budget_maximum_limit) * 100
+            st.metric(
+                "Peak Utilization",
+                f"{budget_utilization:.1f}%",
+                f"${max_monthly_cost:.2f} peak cost"
+            )
+        
+        # Budget status alert
+        if months_over_budget > 0:
+            st.warning(f"⚠️ **Budget Alert**: {months_over_budget} month(s) projected to exceed ${budget_maximum_limit:.0f} limit")
+            st.markdown("**Recommendation**: Consider cost optimization or budget adjustment")
+        elif max_monthly_cost > budget_maximum_limit * 0.9:
+            st.info(f"💡 **Budget Notice**: Approaching ${budget_maximum_limit:.0f} limit ({budget_utilization:.1f}% peak utilization)")
+        else:
+            st.success(f"✅ **Budget Healthy**: All months within ${budget_maximum_limit:.0f} limit")
     
     def _render_detailed_forecast_breakdown(self):
         """Render detailed forecast breakdown table"""
@@ -4075,7 +4398,7 @@ With these optimizations, your 6-month cost could be ${(current_cost - total_sav
                 f"+{new_storage - current_storage}GB"
             )    
 
-    # Decisions Tab Implementation
+    # Demands Tab Implementation
     def _render_resource_sheet_tab(self):
         """Render resource sheet tab with CSV upload and cost estimation"""
         st.markdown("#### 📋 Resource Sheet - Cost Estimation & Analysis")
@@ -4583,52 +4906,190 @@ With these optimizations, your 6-month cost could be ${(current_cost - total_sav
             
             st.plotly_chart(fig2, use_container_width=True)
         
-        # Trending Analysis
-        st.markdown("#### 📈 6-Month Cost Trending")
+        # Dynamic Duration Cost Analysis
+        # Extract maximum duration from CSV data
+        max_duration = self._extract_max_duration_from_csv(df)
         
-        months = ['Oct-25', 'Nov-25', 'Dec-25', 'Jan-26', 'Feb-26', 'Mar-26']
+        st.markdown(f"#### 📊 {max_duration}-Month Cost Trending Analysis")
         
-        # Current usage trend (with organic growth)
+        # Show duration detection info
+        duration_info = []
+        for index, row in df.iterrows():
+            duration_str = str(row.get('Duration (if temporary)', '')).strip()
+            if duration_str and duration_str != 'nan':
+                resource_type = row.get('Resource Type', f'Resource {index+1}')
+                duration_info.append(f"{resource_type}: {duration_str}")
+        
+        if duration_info:
+            with st.expander("📋 Duration Details from CSV"):
+                for info in duration_info:
+                    st.write(f"• {info}")
+                st.write(f"**Maximum Duration Detected:** {max_duration} months")
+        
+        st.markdown(f"*Chart shows {max_duration}-month projection. Current usage (blue bars), Planned usage (red bars), and Cost difference (orange line).*")
+        
+        # Add explanation for the difference line
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.info("🔵 **Current Usage**: Baseline costs with organic growth")
+        with col2:
+            st.info("🔴 **Planned Usage**: Costs with new resources from CSV")
+        with col3:
+            st.info("🟠 **Cost Difference**: Additional cost impact (Planned - Current)")
+        
+        # Generate month labels based on actual duration (proper month calculation)
+        from datetime import datetime
+        import calendar
+        
+        start_date = datetime(2025, 10, 1)  # Start from Oct 2025
+        months = []
+        for i in range(max_duration):
+            # Proper month calculation
+            year = start_date.year
+            month = start_date.month + i
+            while month > 12:
+                year += 1
+                month -= 12
+            
+            month_label = f"{calendar.month_abbr[month]} {str(year)[2:]}"
+            months.append(month_label)
+        
+        # Current usage trend (with organic growth) - rounded to 2 decimal places
         current_trend = []
-        for i in range(6):
-            cost = current_monthly * (1.08 ** i)  # 8% monthly growth
+        for i in range(max_duration):
+            cost = round(current_monthly * (1.08 ** i), 2)  # 8% monthly growth
             current_trend.append(cost)
         
-        # Planned usage trend
+        # Planned usage trend - rounded to 2 decimal places
         planned_trend = []
-        for i in range(6):
-            cost = planned_monthly * (1.05 ** i)  # 5% monthly growth (more controlled)
+        for i in range(max_duration):
+            cost = round(planned_monthly * (1.05 ** i), 2)  # 5% monthly growth (more controlled)
             planned_trend.append(cost)
         
-        fig3 = go.Figure()
+        # Calculate the difference between planned and current usage - rounded to 2 decimal places
+        difference_trend = []
+        for i in range(max_duration):
+            difference = round(planned_trend[i] - current_trend[i], 2)
+            difference_trend.append(difference)
         
-        fig3.add_trace(go.Scatter(
-            x=months,
-            y=current_trend,
-            mode='lines+markers',
-            name='Current Usage Trend',
-            line=dict(color='#4ECDC4', width=3),
-            marker=dict(size=8)
-        ))
+        # Create combined bar and line chart with secondary y-axis
+        from plotly.subplots import make_subplots
         
-        fig3.add_trace(go.Scatter(
-            x=months,
-            y=planned_trend,
-            mode='lines+markers',
-            name='Planned Usage Trend',
-            line=dict(color='#FF6B6B', width=3),
-            marker=dict(size=8)
-        ))
+        fig3 = make_subplots(specs=[[{"secondary_y": True}]])
         
-        fig3.update_layout(
-            title="6-Month Cost Trending Comparison",
-            xaxis_title="Month",
-            yaxis_title="Monthly Cost ($)",
-            height=400,
-            hovermode='x unified'
+        # Add current usage as bars
+        fig3.add_trace(
+            go.Bar(
+                x=months,
+                y=current_trend,
+                name='Current Usage',
+                marker_color='rgba(78, 205, 196, 0.7)',
+                text=[f'${cost:.2f}' for cost in current_trend],
+                textposition='auto',
+                opacity=0.8,
+                offsetgroup=1
+            ),
+            secondary_y=False
         )
         
+        # Add planned usage as bars
+        fig3.add_trace(
+            go.Bar(
+                x=months,
+                y=planned_trend,
+                name='Planned Usage',
+                marker_color='rgba(255, 107, 107, 0.7)',
+                text=[f'${cost:.2f}' for cost in planned_trend],
+                textposition='auto',
+                opacity=0.8,
+                offsetgroup=2
+            ),
+            secondary_y=False
+        )
+        
+        # Add difference as line graph on same axis (fixed positioning)
+        fig3.add_trace(
+            go.Scatter(
+                x=months,
+                y=difference_trend,
+                mode='lines+markers',
+                name='Cost Difference',
+                line=dict(color='#FFA726', width=3),
+                marker=dict(size=8, color='#FFA726', symbol='diamond'),
+                text=[f'${diff:+.2f}' for diff in difference_trend],
+                textposition='top center',
+                hovertemplate='<b>Cost Difference</b><br>' +
+                             'Month: %{x}<br>' +
+                             'Difference: $%{y:+.2f}<extra></extra>'
+            ),
+            secondary_y=False
+        )
+        
+        # Update layout (similar to other graphs)
+        fig3.update_layout(
+            title=f"{max_duration}-Month Cost Trending Analysis",
+            xaxis_title="Month",
+            yaxis_title="Monthly Cost ($)",
+            height=500,
+            hovermode='x unified',
+            showlegend=True,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            ),
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            barmode='group'
+        )
+        
+        # Add grid for better readability
+        fig3.update_xaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
+        fig3.update_yaxes(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)')
+        
         st.plotly_chart(fig3, use_container_width=True)
+        
+        # Trending Analysis Summary
+        st.markdown("##### 📊 Trending Analysis Summary")
+        
+        # Calculate key metrics from the trends
+        total_current_cost = sum(current_trend)
+        total_planned_cost = sum(planned_trend)
+        total_difference = sum(difference_trend)
+        avg_monthly_difference = total_difference / max_duration
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric(
+                f"Total Current Cost ({max_duration} months)",
+                f"${total_current_cost:.2f}",
+                "Baseline projection"
+            )
+        
+        with col2:
+            st.metric(
+                f"Total Planned Cost ({max_duration} months)",
+                f"${total_planned_cost:.2f}",
+                "With new resources"
+            )
+        
+        with col3:
+            st.metric(
+                f"Total Additional Cost ({max_duration} months)",
+                f"${total_difference:.2f}",
+                f"${avg_monthly_difference:.2f}/month avg"
+            )
+        
+        with col4:
+            percentage_increase = ((total_planned_cost - total_current_cost) / total_current_cost * 100) if total_current_cost > 0 else 0
+            st.metric(
+                "Cost Impact",
+                f"+{percentage_increase:.1f}%",
+                "Total increase"
+            )
         
         # Summary metrics
         col1, col2, col3, col4 = st.columns(4)
@@ -4658,12 +5119,59 @@ With these optimizations, your 6-month cost could be ${(current_cost - total_sav
             )
         
         with col4:
-            six_month_total = sum(planned_trend)
+            duration_total = sum(planned_trend)
             st.metric(
-                "6-Month Total",
-                f"${six_month_total:.2f}",
+                f"{max_duration}-Month Total",
+                f"${duration_total:.2f}",
                 "projected cost"
             )
+    
+    def _extract_max_duration_from_csv(self, df):
+        """Extract the maximum duration from CSV data"""
+        import re
+        
+        max_duration = 3  # Default to 3 months (more reasonable default)
+        durations_found = []
+        
+        for index, row in df.iterrows():
+            duration_str = str(row.get('Duration (if temporary)', '')).lower().strip()
+            
+            if not duration_str or duration_str == 'nan' or duration_str == 'permanent' or duration_str == '':
+                continue
+                
+            # Multiple patterns to match duration
+            patterns = [
+                r'(\d+)\s*months?',  # "2 months", "3 month"
+                r'(\d+)\s*mo',       # "2 mo"
+                r'(\d+)$',           # Just a number "2"
+                r'(\d+)\s*m(?!i)',   # "2m" but not "2mi"
+            ]
+            
+            for pattern in patterns:
+                duration_match = re.search(pattern, duration_str)
+                if duration_match:
+                    duration = int(duration_match.group(1))
+                    if 1 <= duration <= 24:  # Reasonable range
+                        durations_found.append(duration)
+                        max_duration = max(max_duration, duration)
+                    break
+        
+        # If no valid durations found, check if we have any data at all
+        if not durations_found:
+            # Look for any numbers in the duration column as fallback
+            for index, row in df.iterrows():
+                duration_str = str(row.get('Duration (if temporary)', ''))
+                numbers = re.findall(r'\d+', duration_str)
+                for num_str in numbers:
+                    num = int(num_str)
+                    if 1 <= num <= 24:
+                        durations_found.append(num)
+                        max_duration = max(max_duration, num)
+        
+        # Ensure reasonable bounds (minimum 2 months, maximum 12 months for display)
+        max_duration = max(2, min(12, max_duration))
+        
+        return max_duration
     
     def _calculate_planned_resources(self, df):
         """Calculate planned resources from CSV data"""
@@ -4715,8 +5223,8 @@ With these optimizations, your 6-month cost could be ${(current_cost - total_sav
         
         import pandas as pd
         
-        # Get current budget status
-        config = Config()
+        # Get current budget status (force fresh reload)
+        config = Config.get_fresh_config()
         warning_limit = config.BUDGET_WARNING_LIMIT
         maximum_limit = config.BUDGET_MAXIMUM_LIMIT
         
@@ -4793,29 +5301,101 @@ With these optimizations, your 6-month cost could be ${(current_cost - total_sav
                     monthly_cost = float(cost_match.group(1))
                     ri_cost = monthly_cost * 0.6  # 40% savings
                     optimized_cost = f"${ri_cost:.2f}/month (with RDS Reserved Instance)"
+                    
+            elif 'networking' in resource_type or 'vpc' in resource_type or 'load' in resource_type:
+                recommendation = "Consider consolidating load balancers and optimizing target groups"
+                # Networking typically has limited optimization, but we can suggest efficiency improvements
+                import re
+                cost_match = re.search(r'\$(\d+\.?\d*)/month', str(row['Cost Estimation']))
+                if cost_match:
+                    monthly_cost = float(cost_match.group(1))
+                    # Assume 10% savings through optimization
+                    optimized_monthly = monthly_cost * 0.9
+                    optimized_cost = f"${optimized_monthly:.2f}/month (optimized configuration)"
+                    
+            elif 'container' in resource_type or 'ecs' in resource_type or 'eks' in resource_type:
+                recommendation = "Consider Fargate for serverless containers and right-size worker nodes"
+                import re
+                cost_match = re.search(r'\$(\d+\.?\d*)/month', str(row['Cost Estimation']))
+                if cost_match:
+                    monthly_cost = float(cost_match.group(1))
+                    # Assume 25% savings with Fargate optimization
+                    fargate_cost = monthly_cost * 0.75
+                    optimized_cost = f"${fargate_cost:.2f}/month (Fargate optimization)"
+                    
+            elif 'lambda' in resource_type or 'serverless' in resource_type:
+                recommendation = "Optimize memory allocation and consider provisioned concurrency"
+                import re
+                cost_match = re.search(r'\$(\d+\.?\d*)/month', str(row['Cost Estimation']))
+                if cost_match:
+                    monthly_cost = float(cost_match.group(1))
+                    # Assume 15% savings through memory optimization
+                    lambda_optimized = monthly_cost * 0.85
+                    optimized_cost = f"${lambda_optimized:.2f}/month (memory optimized)"
+                    
+            else:
+                # Other services - general optimization
+                recommendation = "Review service usage patterns and consider service consolidation"
+                import re
+                cost_match = re.search(r'\$(\d+\.?\d*)/month', str(row['Cost Estimation']))
+                if cost_match:
+                    monthly_cost = float(cost_match.group(1))
+                    # Assume 10% general optimization savings
+                    general_optimized = monthly_cost * 0.9
+                    optimized_cost = f"${general_optimized:.2f}/month (usage optimization)"
+            
+            # If no optimization was applied, keep original cost
+            if optimized_cost == row['Cost Estimation']:
+                # Apply a default 5% optimization for any service
+                import re
+                cost_match = re.search(r'\$(\d+\.?\d*)/month', str(row['Cost Estimation']))
+                if cost_match:
+                    monthly_cost = float(cost_match.group(1))
+                    default_optimized = monthly_cost * 0.95
+                    optimized_cost = f"${default_optimized:.2f}/month (general optimization)"
             
             optimized_df.at[index, 'Optimization Recommendation'] = recommendation
             optimized_df.at[index, 'Optimized Cost Estimation'] = optimized_cost
             
-            # Calculate budget impact
-            original_cost_str = str(row['Cost Estimation']).replace('$', '').replace('/month', '').replace(',', '')
-            optimized_cost_str = str(optimized_cost).replace('$', '').replace('/month', '').replace(',', '').split('(')[0].strip()
-            
+            # Calculate budget impact with improved parsing
             try:
-                original_cost = float(original_cost_str) if original_cost_str and original_cost_str != 'nan' else 0
-                opt_cost = float(optimized_cost_str) if optimized_cost_str and optimized_cost_str != 'nan' else original_cost
+                # Extract monthly cost from original cost estimation
+                import re
+                original_cost_match = re.search(r'\$(\d+\.?\d*)/month', str(row['Cost Estimation']))
+                original_cost = float(original_cost_match.group(1)) if original_cost_match else 0
+                
+                # Extract monthly cost from optimized cost estimation
+                optimized_cost_match = re.search(r'\$(\d+\.?\d*)/month', str(optimized_cost))
+                opt_cost = float(optimized_cost_match.group(1)) if optimized_cost_match else original_cost
+                
+                # Calculate savings
                 savings = original_cost - opt_cost
                 
                 if savings > 0:
-                    budget_impact = f"Saves ${savings:.2f}/month"
+                    savings_percentage = (savings / original_cost * 100) if original_cost > 0 else 0
+                    budget_impact = f"Saves ${savings:.2f}/month ({savings_percentage:.1f}%)"
                 elif savings < 0:
-                    budget_impact = f"Costs ${abs(savings):.2f}/month more"
+                    cost_increase = abs(savings)
+                    increase_percentage = (cost_increase / original_cost * 100) if original_cost > 0 else 0
+                    budget_impact = f"Costs ${cost_increase:.2f}/month more (+{increase_percentage:.1f}%)"
                 else:
                     budget_impact = "No cost change"
                     
                 optimized_df.at[index, 'Budget Impact'] = budget_impact
-            except:
-                optimized_df.at[index, 'Budget Impact'] = "Unable to calculate"
+                
+            except Exception as e:
+                # Fallback calculation if regex fails
+                try:
+                    # Simple fallback - assume 20% savings for optimization
+                    original_simple = float(str(row['Cost Estimation']).split('$')[1].split('/')[0]) if '$' in str(row['Cost Estimation']) else 0
+                    if original_simple > 0:
+                        estimated_savings = original_simple * 0.2  # Assume 20% savings
+                        budget_impact = f"Est. saves ${estimated_savings:.2f}/month (20%)"
+                    else:
+                        budget_impact = "Optimization available"
+                    optimized_df.at[index, 'Budget Impact'] = budget_impact
+                except:
+                    optimized_df.at[index, 'Budget Impact'] = "Optimization available"
             
             if recommendation:
                 optimization_notes.append(f"• **{row['Resource Type']}**: {recommendation}")
@@ -5495,10 +6075,58 @@ This infrastructure investment aligns with our digital transformation strategy a
         st.markdown("#### 💰 Budgeting - Resource Allocation Based on Budget")
         st.markdown("*Upload your project budget CSV to get optimal resource allocation recommendations*")
         
-        # Load budget configuration from .env
+        # Check for recent settings updates
+        if 'settings_to_budgeting_notification' in st.session_state:
+            st.success("🔄 **Budget configuration updated from Settings tab!** Values below are now current.")
+            del st.session_state.settings_to_budgeting_notification
+        
+        # Load budget configuration from .env - use session state for dynamic updates
         try:
-            from ..config.budget_config import BudgetConfig
-            budget_config = BudgetConfig()
+            # Check .env file modification time for auto-refresh
+            import os
+            env_file_path = '.env'
+            current_env_mtime = 0
+            
+            if os.path.exists(env_file_path):
+                current_env_mtime = os.path.getmtime(env_file_path)
+            
+            # Check if we need to reload config due to file changes
+            need_reload = False
+            if 'env_file_mtime' not in st.session_state:
+                st.session_state.env_file_mtime = current_env_mtime
+                need_reload = True
+            elif st.session_state.env_file_mtime != current_env_mtime:
+                st.session_state.env_file_mtime = current_env_mtime
+                need_reload = True
+                st.success("🔄 **.env file changes detected** - Budget configuration automatically refreshed!")
+                st.info("✨ **Auto-Sync:** Values updated from Settings tab changes.")
+            
+            # Load or reload configuration
+            if need_reload or 'budget_config' not in st.session_state:
+                # Load fresh values from config.py (force reload)
+                from config import Config
+                config = Config.get_fresh_config()
+                
+                # Update session state with current .env values
+                from datetime import datetime
+                st.session_state.budget_config = {
+                    'default_budget': config.DEFAULT_BUDGET,
+                    'warning_limit': config.BUDGET_WARNING_LIMIT,
+                    'maximum_limit': config.BUDGET_MAXIMUM_LIMIT,
+                    'last_updated': datetime.now().strftime('%H:%M:%S')
+                }
+            
+            # Use values from session state (either fresh or cached)
+            session_config = st.session_state.budget_config
+            budget_config = type('obj', (object,), {
+                'default_budget': float(session_config['default_budget']),
+                'warning_limit': float(session_config['warning_limit']),
+                'maximum_limit': float(session_config['maximum_limit']),
+                'get_budget_status': lambda self, spend: 'critical' if spend >= session_config['maximum_limit'] else 'warning' if spend >= session_config['warning_limit'] else 'healthy',
+                'get_budget_utilization': lambda self, spend: (spend / session_config['default_budget']) * 100 if session_config['default_budget'] > 0 else 0,
+                'get_remaining_budget': lambda self, spend: max(0, session_config['warning_limit'] - spend)
+            })()
+                
         except Exception as e:
             st.error(f"Error loading budget configuration: {e}")
             # Fallback to default values
@@ -5515,7 +6143,43 @@ This infrastructure investment aligns with our digital transformation strategy a
         current_monthly_spend = 58.21
         
         # Display budget configuration from .env
-        st.markdown("##### 📊 Budget Configuration (from .env)")
+        col_header1, col_header2 = st.columns([3, 1])
+        
+        with col_header1:
+            st.markdown("##### 📊 Budget Configuration (from .env)")
+            
+            # Show update indicator if config was recently changed
+            if 'budget_config_updated' in st.session_state and st.session_state.budget_config_updated:
+                st.success("🔄 **Configuration Updated!** Values below reflect latest changes from Settings tab.")
+                st.info("✨ **Live Sync Active** - Budget values are automatically synchronized across all tabs.")
+                # Clear the flag after showing the message
+                del st.session_state.budget_config_updated
+        
+        with col_header2:
+            col_btn1, col_btn2 = st.columns(2)
+            
+            with col_btn1:
+                if st.button("🔄 Refresh", help="Reload budget configuration from .env file"):
+                    # Force reload from .env file
+                    from config import Config
+                    config = Config.get_fresh_config()
+                    
+                    # Update session state with fresh values from .env
+                    from datetime import datetime
+                    st.session_state.budget_config = {
+                        'default_budget': config.DEFAULT_BUDGET,
+                        'warning_limit': config.BUDGET_WARNING_LIMIT,
+                        'maximum_limit': config.BUDGET_MAXIMUM_LIMIT,
+                        'last_updated': datetime.now().strftime('%H:%M:%S')
+                    }
+                    
+                    st.success("✅ Budget configuration refreshed from .env file!")
+                    st.rerun()
+            
+            with col_btn2:
+                if st.button("⚙️ Settings", help="Go to Settings tab to modify budget configuration"):
+                    st.session_state.dashboard_mode = 'settings'
+                    st.rerun()
         
         col1, col2, col3, col4 = st.columns(4)
         
@@ -5548,6 +6212,42 @@ This infrastructure investment aligns with our digital transformation strategy a
                 f"${current_monthly_spend:.2f} of ${budget_config.default_budget:.2f}"
             )
         
+        # Debug: Show current .env values for verification
+        with st.expander("🔍 Debug: Current .env Values", expanded=False):
+            from config import Config
+            debug_config = Config.get_fresh_config()
+            col_debug1, col_debug2, col_debug3 = st.columns(3)
+            
+            with col_debug1:
+                st.code(f"DEFAULT_BUDGET={debug_config.DEFAULT_BUDGET}")
+            with col_debug2:
+                st.code(f"BUDGET_WARNING_LIMIT={debug_config.BUDGET_WARNING_LIMIT}")
+            with col_debug3:
+                st.code(f"BUDGET_MAXIMUM_LIMIT={debug_config.BUDGET_MAXIMUM_LIMIT}")
+            
+            st.caption("These are the actual values from your .env file")
+        
+        # Show last update time and sync status
+        col_status1, col_status2 = st.columns(2)
+        
+        with col_status1:
+            if 'last_updated' in st.session_state.budget_config:
+                st.caption(f"📅 Configuration loaded at: {st.session_state.budget_config['last_updated']}")
+        
+        with col_status2:
+            # Show sync status
+            import os
+            if os.path.exists('.env'):
+                env_mtime = os.path.getmtime('.env')
+                session_mtime = st.session_state.get('env_file_mtime', 0)
+                
+                if abs(env_mtime - session_mtime) < 1:  # Within 1 second
+                    st.caption("🟢 **Sync Status:** Up to date with .env file")
+                else:
+                    st.caption("🟡 **Sync Status:** .env file may have changed - click Refresh Config")
+            else:
+                st.caption("🔴 **Sync Status:** .env file not found")
+        
         # Budget status indicator
         budget_status = budget_config.get_budget_status(current_monthly_spend)
         status_colors = {
@@ -5564,90 +6264,46 @@ This infrastructure investment aligns with our digital transformation strategy a
         
         st.markdown(f"**Budget Status:** {status_colors[budget_status]} {status_messages[budget_status]}")
         
-        # Budget CSV Upload Section
+        # Live Budget Impact Preview
         st.markdown("---")
-        st.markdown("##### 📤 Upload Budget Planning CSV")
+        st.markdown("##### 🎯 Live Budget Impact Preview")
         
-        # Show expected budget CSV format
-        with st.expander("📋 Expected Budget CSV Format", expanded=True):
-            st.markdown(f"""
-            **Required Columns:**
-            - `Field`: Budget category or description
-            - `Description`: Detailed description of the budget item  
-            - `Example`: Example value or amount
-            
-            **Sample Structure:**
-            ```csv
-            Field,Description,Example
-            Estimated Monthly Cost,Total AWS spend expected,{budget_config.default_budget}
-            Project Duration,Duration of the project in months,6
-            Priority Services,Critical services that must be included,EC2 RDS
-            Optional Services,Services that can be scaled down if needed,S3 Lambda
-            ```
-            
-            **Important Notes:**
-            - Use numeric values without currency symbols for costs
-            - Budget should align with .env configuration (${budget_config.default_budget:.2f})
-            - Separate multiple services with spaces
-            - Duration should be in months as a number
-            """)
+        col_preview1, col_preview2, col_preview3 = st.columns(3)
         
-        budget_file = st.file_uploader(
-            "Choose Budget CSV file",
-            type=['csv'],
-            help="Upload a CSV file with your budget planning data",
-            key="budget_upload"
-        )
+        with col_preview1:
+            remaining_budget = budget_config.get_remaining_budget(current_monthly_spend)
+            st.metric(
+                "Remaining Budget",
+                f"${remaining_budget:.2f}",
+                f"Until warning limit (${budget_config.warning_limit:.2f})"
+            )
         
-        if budget_file is None:
-            st.info("👆 Please upload a budget CSV file to proceed with budget-based resource allocation.")
-            st.warning("⚠️ No sample data provided. You must upload a properly structured budget CSV file to use this feature.")
-            
-            # Show budget-based recommendations
-            self._render_budget_recommendations(budget_config, current_monthly_spend)
-            return
+        with col_preview2:
+            buffer_amount = budget_config.maximum_limit - current_monthly_spend
+            st.metric(
+                "Safety Buffer",
+                f"${buffer_amount:.2f}",
+                f"Until maximum limit (${budget_config.maximum_limit:.2f})"
+            )
         
-        try:
-            import pandas as pd
-            
-            # Read budget CSV
-            budget_df = pd.read_csv(budget_file)
-            
-            # Validate required columns
-            required_columns = ['Field', 'Description', 'Example']
-            missing_columns = [col for col in required_columns if col not in budget_df.columns]
-            
-            if missing_columns:
-                st.error(f"❌ Missing required columns: {', '.join(missing_columns)}")
-                st.info("Please ensure your CSV file has the columns: Field, Description, Example")
-                return
-            
-            # Validate data content
-            if len(budget_df) == 0:
-                st.error("❌ CSV file is empty. Please provide budget data.")
-                return
-            
-            # Display uploaded data
-            st.success("✅ Budget CSV uploaded successfully!")
-            st.markdown("##### 📊 Uploaded Budget Data")
-            st.dataframe(budget_df, use_container_width=True)
-            
-            # Process budget data with .env integration
-            budget_analysis = self._process_budget_csv_with_config(budget_df, budget_config)
-            st.session_state.decision_budget_data = budget_analysis
-            
-            # Display budget analysis
-            self._render_budget_analysis_with_config(budget_analysis, budget_config)
-            
-            # Budget-based resource allocation
-            self._render_budget_resource_allocation_with_config(budget_analysis, budget_config)
-            
-            # Budget approval workflow
-            self._render_budget_approval_workflow_with_config(budget_analysis, budget_config)
-            
-        except Exception as e:
-            st.error(f"❌ Error processing budget CSV file: {str(e)}")
-            st.info("Please ensure your CSV file follows the expected format and contains valid data.")
+        with col_preview3:
+            # Calculate how much additional spend would trigger warnings
+            additional_for_warning = max(0, budget_config.warning_limit - current_monthly_spend)
+            if additional_for_warning > 0:
+                st.metric(
+                    "Warning Trigger",
+                    f"${additional_for_warning:.2f}",
+                    "Additional spend to trigger warning"
+                )
+            else:
+                st.metric(
+                    "Warning Active",
+                    "⚠️ Active",
+                    f"Exceeded by ${abs(additional_for_warning):.2f}"
+                )
+        
+        # Show budget-based recommendations
+        self._render_budget_recommendations(budget_config, current_monthly_spend)
     
     def _render_budget_recommendations(self, budget_config, current_spend):
         """Render budget-based recommendations when no CSV is uploaded"""
