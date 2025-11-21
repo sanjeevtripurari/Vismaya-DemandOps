@@ -1,0 +1,274 @@
+{
+  "benchmark_info": {
+    "timestamp": "2025-11-02T21:14:24.674940",
+    "system_info": {
+      "cpu_count": 8,
+      "memory_total_gb": 15.77,
+      "memory_available_gb": 1.34,
+      "disk_usage_gb": 931.39,
+      "python_version": "3.12.4",
+      "platform": "win32"
+    },
+    "stack_layers": [
+      "Frontend Layer (Streamlit + Modern Dashboard)",
+      "Application Layer (Python + DI + Use Cases)",
+      "AI Layer (AWS Bedrock + Agentic Framework)",
+      "Communication (MCP Protocol + Agent Registry)",
+      "API Layer (Bedrock, Pricing, Cost Explorer)",
+      "Data Layer (SQLite)",
+      "Infrastructure (EC2 + AWS Services)"
+    ]
+  },
+  "layer_performance": {
+    "frontend": {
+      "status": "SUCCESS",
+      "total_time": 23.10577893257141,
+      "dashboard_init_time": 1.5650053024291992,
+      "render_time": 0.10608172416687012,
+      "components_loaded": [
+        "EnhancedDashboard",
+        "ModernDashboardFramework",
+        "ConversationalAIInterface"
+      ],
+      "metrics": {
+        "import_speed": "Fast",
+        "initialization_speed": "Fast",
+        "memory_usage_mb": 129.02734375
+      }
+    },
+    "application": {
+      "status": "SUCCESS",
+      "total_time": 5.455190658569336,
+      "dependency_injection_time": 5.455190658569336,
+      "use_case_init_time": 0.0,
+      "services_registered": 20,
+      "use_cases_available": [
+        "GetUsageSummaryUseCase",
+        "AnalyzeScenarioUseCase",
+        "GetCostInsightsUseCase",
+        "HandleChatUseCase"
+      ],
+      "metrics": {
+        "di_performance": "Good",
+        "service_count": 20,
+        "memory_usage_mb": 163.59765625
+      }
+    },
+    "ai": {
+      "status": "SUCCESS",
+      "total_time": 0.33382415771484375,
+      "bedrock_init_time": 0.2152698040008545,
+      "agentic_framework_time": 0.0,
+      "agentic_framework_available": true,
+      "ai_components": [
+        "BedrockAIAssistant",
+        "AdvancedForecastingAssistant",
+        "Agent Strands (if available)"
+      ],
+      "metrics": {
+        "bedrock_performance": "Good",
+        "agentic_support": true,
+        "memory_usage_mb": 164.75
+      }
+    },
+    "communication": {
+      "status": "SUCCESS",
+      "total_time": 2.5405046939849854,
+      "mcp_protocol_time": 2.413207769393921,
+      "agent_registry_time": 0.12729692459106445,
+      "mcp_available": false,
+      "communication_protocols": [
+        "MCP Protocol (if available)",
+        "Agent-to-Agent Messaging",
+        "Result Coordination"
+      ],
+      "metrics": {
+        "mcp_support": false,
+        "communication_speed": "Fast",
+        "memory_usage_mb": 189.01171875
+      }
+    },
+    "api": {
+      "status": "SUCCESS",
+      "total_time": 2.109025001525879,
+      "session_creation_time": 2.109025001525879,
+      "api_test_time": 0.0,
+      "api_clients": {
+        "bedrock": "Available",
+        "pricing": "Available",
+        "cost_explorer": "Disabled (Cost Saving)",
+        "ec2": "Available",
+        "rds": "Available"
+      },
+      "aws_integration": [
+        "Bedrock API",
+        "Pricing API",
+        "EC2 API",
+        "RDS API",
+        "Cost Explorer (Optional)"
+      ],
+      "metrics": {
+        "session_performance": "Good",
+        "api_availability": 5,
+        "memory_usage_mb": 196.953125
+      }
+    },
+    "data": {
+      "status": "SUCCESS",
+      "total_time": 0.12746119499206543,
+      "db_init_time": 0.020267963409423828,
+      "operations_time": 0.1071932315826416,
+      "tables_tested": {
+        "current_resources": 0,
+        "forecasting_data": 15,
+        "billing_breakdown": 0,
+        "cost_summary": 0
+      },
+      "database_features": [
+        "SQLite Repository",
+        "Tabular Data Service",
+        "Enhanced Data Tables",
+        "Export Capabilities"
+      ],
+      "metrics": {
+        "db_performance": "Excellent",
+        "query_speed": "Fast",
+        "total_records": 15,
+        "memory_usage_mb": 197.98046875
+      }
+    },
+    "infrastructure": {
+      "status": "SUCCESS",
+      "total_time": 0.0,
+      "infrastructure_init_time": 0.0,
+      "config_validation_time": 0.0,
+      "infrastructure_components": {
+        "AWSResourceProvider": "Available",
+        "RealUsageAnalyzer": "Available",
+        "AWSSessionFactory": "Available",
+        "BedrockAIAssistant": "Available"
+      },
+      "aws_services": [
+        "EC2 Resource Provider",
+        "Real Usage Analyzer",
+        "Bedrock AI Assistant",
+        "Session Factory"
+      ],
+      "metrics": {
+        "infrastructure_performance": "Excellent",
+        "config_valid": true,
+        "component_count": 4,
+        "memory_usage_mb": 197.984375
+      }
+    }
+  },
+  "integration_tests": {
+    "status": "SUCCESS",
+    "total_time": 2.382308006286621,
+    "end_to_end_test": {
+      "time": 2.382308006286621,
+      "status": "PASS",
+      "components_integrated": [
+        "DI Container",
+        "Use Cases",
+        "Services"
+      ]
+    },
+    "ai_integration_test": {
+      "time": 0.0,
+      "status": "PASS",
+      "available": true
+    },
+    "integration_points": [
+      "Frontend \u2194 Application Layer",
+      "Application \u2194 AI Layer",
+      "AI \u2194 Communication Layer",
+      "Communication \u2194 API Layer",
+      "API \u2194 Data Layer",
+      "Data \u2194 Infrastructure Layer"
+    ]
+  },
+  "resource_usage": {
+    "memory": {
+      "rss_mb": 215.55,
+      "vms_mb": 406.88,
+      "percent": 1.33
+    },
+    "cpu": {
+      "percent": 0.0,
+      "num_threads": 16
+    },
+    "system": {
+      "cpu_count": 8,
+      "memory_total_gb": 15.77,
+      "memory_available_gb": 1.28,
+      "memory_used_percent": 91.9
+    }
+  },
+  "scalability_metrics": {},
+  "cost_analysis": {},
+  "benchmark_summary": {
+    "overall_performance": {
+      "rating": "Needs Optimization",
+      "total_time": 33.67,
+      "successful_layers": 7,
+      "total_layers": 7,
+      "success_rate": 100.0
+    },
+    "layer_rankings": [
+      {
+        "layer": "infrastructure",
+        "time": 0.0,
+        "rating": "Excellent"
+      },
+      {
+        "layer": "data",
+        "time": 0.12746119499206543,
+        "rating": "Excellent"
+      },
+      {
+        "layer": "ai",
+        "time": 0.33382415771484375,
+        "rating": "Excellent"
+      },
+      {
+        "layer": "api",
+        "time": 2.109025001525879,
+        "rating": "Good"
+      },
+      {
+        "layer": "communication",
+        "time": 2.5405046939849854,
+        "rating": "Good"
+      },
+      {
+        "layer": "application",
+        "time": 5.455190658569336,
+        "rating": "Fair"
+      },
+      {
+        "layer": "frontend",
+        "time": 23.10577893257141,
+        "rating": "Fair"
+      }
+    ],
+    "recommendations": [
+      "Optimize frontend layer performance (current: 23.11s)",
+      "Optimize application layer performance (current: 5.46s)"
+    ],
+    "scalability_assessment": {
+      "current_capacity": "Single Instance",
+      "scaling_potential": "High",
+      "bottlenecks": [
+        "Database I/O",
+        "AWS API Rate Limits"
+      ],
+      "scaling_strategies": [
+        "Database connection pooling",
+        "API request batching",
+        "Caching layer implementation",
+        "Horizontal scaling with load balancer"
+      ]
+    }
+  }
+}
