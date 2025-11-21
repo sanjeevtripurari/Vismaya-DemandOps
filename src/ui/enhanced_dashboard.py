@@ -4926,16 +4926,14 @@ With these optimizations, your 6-month cost could be ${(current_cost - total_sav
                     st.write(f"• {info}")
                 st.write(f"**Maximum Duration Detected:** {max_duration} months")
         
-        st.markdown(f"*Chart shows {max_duration}-month projection. Current usage (blue bars), Planned usage (red bars), and Cost difference (orange line).*")
+        st.markdown(f"*Chart shows {max_duration}-month projection. Current usage (blue bars) and Planned usage (red bars).*")
         
-        # Add explanation for the difference line
-        col1, col2, col3 = st.columns(3)
+        # Add explanation for the chart
+        col1, col2 = st.columns(2)
         with col1:
             st.info("🔵 **Current Usage**: Baseline costs with organic growth")
         with col2:
             st.info("🔴 **Planned Usage**: Costs with new resources from CSV")
-        with col3:
-            st.info("🟠 **Cost Difference**: Additional cost impact (Planned - Current)")
         
         # Generate month labels based on actual duration (proper month calculation)
         from datetime import datetime
@@ -5007,23 +5005,7 @@ With these optimizations, your 6-month cost could be ${(current_cost - total_sav
             secondary_y=False
         )
         
-        # Add difference as line graph on same axis (fixed positioning)
-        fig3.add_trace(
-            go.Scatter(
-                x=months,
-                y=difference_trend,
-                mode='lines+markers',
-                name='Cost Difference',
-                line=dict(color='#FFA726', width=3),
-                marker=dict(size=8, color='#FFA726', symbol='diamond'),
-                text=[f'${diff:+.2f}' for diff in difference_trend],
-                textposition='top center',
-                hovertemplate='<b>Cost Difference</b><br>' +
-                             'Month: %{x}<br>' +
-                             'Difference: $%{y:+.2f}<extra></extra>'
-            ),
-            secondary_y=False
-        )
+
         
         # Update layout (similar to other graphs)
         fig3.update_layout(
