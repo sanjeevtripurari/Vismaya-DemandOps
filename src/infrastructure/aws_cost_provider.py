@@ -98,18 +98,21 @@ class AWSCostProvider(ICostDataProvider):
             if not self._cost_explorer:
                 raise Exception("AWS Cost Explorer client not available")
             
+            # Use consistent date range - current month to date
             now = datetime.now()
             start_date = now.replace(day=1).strftime('%Y-%m-%d')
-            end_date = now.strftime('%Y-%m-%d')
+            # Use tomorrow's date to ensure we get today's data
+            end_date = (now + timedelta(days=1)).strftime('%Y-%m-%d')
             
-            logger.info(f"Fetching real AWS costs from {start_date} to {end_date}")
+            logger.info(f"Fetching real AWS total costs from {start_date} to {end_date}")
             
             # Track API cost
             from ..services.api_cost_tracker import api_cost_tracker
             api_cost_tracker.track_cost_explorer_call('GetCostAndUsage', {
                 'start_date': start_date,
                 'end_date': end_date,
-                'granularity': 'MONTHLY'
+                'granularity': 'MONTHLY',
+                'metrics': ['BlendedCost']
             })
             
             response = self._cost_explorer.get_cost_and_usage(
@@ -121,16 +124,16 @@ class AWSCostProvider(ICostDataProvider):
                 Metrics=['BlendedCost']
             )
             
-            if response['ResultsByTime']:
-                amount = float(response['ResultsByTime'][0]['Total']['BlendedCost']['Amount'])
-                logger.info(f"✅ Real AWS costs retrieved: ${amount:.2f}")
+            if response['ResultsByTime'] and len(response['ResultsByTime']) > 0:
+                total_cost = float(response['ResultsByTime'][0]['Total']['BlendedCost']['Amount'])
+                logger.info(f"✅ Real AWS total costs retrieved: ${total_cost:.2f}")
                 return CostData(
-                    amount=amount,
+                    amount=total_cost,
                     start_date=datetime.strptime(start_date, '%Y-%m-%d'),
                     end_date=datetime.strptime(end_date, '%Y-%m-%d')
                 )
             
-            logger.info("No cost data found in AWS response - returning $0.00")
+            logger.warning("No cost data found in AWS response - returning $0.00")
             return CostData(amount=0.0)
             
         except Exception as e:
@@ -150,9 +153,11 @@ class AWSCostProvider(ICostDataProvider):
                 logger.error("Cost Explorer client not available for service costs")
                 raise Exception("AWS Cost Explorer not accessible for service breakdown")
             
+            # Use EXACT same date range as get_current_costs()
             now = datetime.now()
             start_date = now.replace(day=1).strftime('%Y-%m-%d')
-            end_date = now.strftime('%Y-%m-%d')
+            # Use tomorrow's date to ensure we get today's data
+            end_date = (now + timedelta(days=1)).strftime('%Y-%m-%d')
             
             logger.info(f"Fetching real AWS service costs from {start_date} to {end_date}")
             
@@ -162,7 +167,8 @@ class AWSCostProvider(ICostDataProvider):
                 'start_date': start_date,
                 'end_date': end_date,
                 'granularity': 'MONTHLY',
-                'group_by': 'SERVICE'
+                'group_by': 'SERVICE',
+                'metrics': ['BlendedCost', 'UnblendedCost', 'UsageQuantity']
             })
             
             response = self._cost_explorer.get_cost_and_usage(
@@ -181,7 +187,11 @@ class AWSCostProvider(ICostDataProvider):
             )
             
             service_costs = []
-            if response['ResultsByTime'] and response['ResultsByTime'][0]['Groups']:
+            total_service_cost = 0.0
+            
+            if response['ResultsByTime'] and len(response['ResultsByTime']) > 0 and response['ResultsByTime'][0].get('Groups'):
+                logger.info(f"Found {len(response['ResultsByTime'][0]['Groups'])} services in Cost Explorer response")
+                
                 for group in response['ResultsByTime'][0]['Groups']:
                     service_name = group['Keys'][0]
                     
@@ -192,8 +202,9 @@ class AWSCostProvider(ICostDataProvider):
                     
                     # Use blended cost as the primary amount
                     amount = blended_cost
+                    total_service_cost += amount
                     
-                    # Include services with any costs, even micro-costs
+                    # Include ALL services, even with $0.00 costs for completeness
                     if amount >= 0:
                         # Create a comprehensive service cost entry
                         cost_data = CostData(
@@ -214,15 +225,18 @@ class AWSCostProvider(ICostDataProvider):
                             ))
                         else:
                             # For unmapped services, log them for visibility and include them
-                            logger.info(f"Unmapped AWS service: {service_name} - ${amount:.2f}")
+                            if amount > 0:
+                                logger.info(f"Unmapped AWS service: {service_name} - ${amount:.2f}")
                             
                             # Use the existing cost_data that already has the service_name set
                             service_costs.append(ServiceCost(
                                 service_type=ServiceType.OTHER,
                                 cost=cost_data
                             ))
+            else:
+                logger.warning("No service cost groups found in Cost Explorer response")
             
-            logger.info(f"✅ Retrieved {len(service_costs)} real AWS service costs")
+            logger.info(f"✅ Retrieved {len(service_costs)} services with total cost: ${total_service_cost:.2f}")
             return service_costs
             
         except Exception as e:
@@ -243,7 +257,13 @@ class AWSCostProvider(ICostDataProvider):
                 raise Exception("AWS Cost Explorer not accessible for trend data")
             
             end_date = datetime.now()
-            start_date = end_date - timedelta(days=months * 30)
+            # Proper month calculation for start date
+            year = end_date.year
+            month = end_date.month - months
+            while month <= 0:
+                year -= 1
+                month += 12
+            start_date = datetime(year, month, 1)
             
             logger.info(f"Fetching real AWS monthly trend from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
             

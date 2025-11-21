@@ -1,0 +1,175 @@
+{
+  "agentic_cost_analysis": {
+    "description": "Use agentic cost analysis instead of legacy service",
+    "enabled": true,
+    "rollout_strategy": "percentage",
+    "rollout_percentage": 100.0,
+    "target_users": [],
+    "conditions": {},
+    "metadata": {
+      "category": "core_functionality",
+      "impact": "high",
+      "dependencies": [
+        "cost_management_agent"
+      ]
+    },
+    "updated_at": "2025-10-26T20:59:47.446160"
+  },
+  "agentic_resource_management": {
+    "description": "Use agentic resource management instead of legacy service",
+    "enabled": true,
+    "rollout_strategy": "percentage",
+    "rollout_percentage": 100.0,
+    "target_users": [],
+    "conditions": {},
+    "metadata": {
+      "category": "core_functionality",
+      "impact": "high",
+      "dependencies": [
+        "resource_management_agent"
+      ]
+    },
+    "updated_at": "2025-10-26T20:59:47.446160"
+  },
+  "agentic_forecasting": {
+    "description": "Use agentic forecasting instead of legacy service",
+    "enabled": true,
+    "rollout_strategy": "percentage",
+    "rollout_percentage": 100.0,
+    "target_users": [],
+    "conditions": {},
+    "metadata": {
+      "category": "core_functionality",
+      "impact": "medium",
+      "dependencies": [
+        "forecasting_agent"
+      ]
+    },
+    "updated_at": "2025-10-26T20:59:47.450605"
+  },
+  "agentic_dashboard": {
+    "description": "Use agentic dashboard backend",
+    "enabled": true,
+    "rollout_strategy": "percentage",
+    "rollout_percentage": 100.0,
+    "target_users": [],
+    "conditions": {},
+    "metadata": {
+      "category": "user_interface",
+      "impact": "high",
+      "dependencies": [
+        "orchestrator_agent",
+        "user_interface_agent"
+      ]
+    },
+    "updated_at": "2025-10-26T20:59:47.454455"
+  },
+  "approval_workflows": {
+    "description": "Enable approval workflow functionality",
+    "enabled": true,
+    "rollout_strategy": "user_list",
+    "rollout_percentage": 100.0,
+    "target_users": [
+      "admin",
+      "ceo",
+      "cto"
+    ],
+    "conditions": {},
+    "metadata": {
+      "category": "governance",
+      "impact": "medium",
+      "dependencies": [
+        "approval_agent"
+      ]
+    },
+    "updated_at": "2025-10-26T20:59:47.457588"
+  },
+  "real_time_decisions": {
+    "description": "Enable real-time decision tracking and notifications",
+    "enabled": true,
+    "rollout_strategy": "percentage",
+    "rollout_percentage": 100.0,
+    "target_users": [],
+    "conditions": {},
+    "metadata": {
+      "category": "governance",
+      "impact": "low",
+      "dependencies": [
+        "approval_agent",
+        "notification_system"
+      ]
+    },
+    "updated_at": "2025-10-26T20:59:47.462503"
+  },
+  "enhanced_ai_assistant": {
+    "description": "Use enhanced AI assistant with multi-agent coordination",
+    "enabled": true,
+    "rollout_strategy": "percentage",
+    "rollout_percentage": 100.0,
+    "target_users": [],
+    "conditions": {},
+    "metadata": {
+      "category": "ai_features",
+      "impact": "medium",
+      "dependencies": [
+        "user_interface_agent",
+        "orchestrator_agent"
+      ]
+    },
+    "updated_at": "2025-10-26T20:59:47.465717"
+  },
+  "cost_optimization_recommendations": {
+    "description": "Enable AI-powered cost optimization recommendations",
+    "enabled": true,
+    "rollout_strategy": "percentage",
+    "rollout_percentage": 100.0,
+    "target_users": [],
+    "conditions": {},
+    "metadata": {
+      "category": "ai_features",
+      "impact": "medium",
+      "dependencies": [
+        "cost_management_agent",
+        "resource_management_agent"
+      ]
+    },
+    "updated_at": "2025-10-26T20:59:47.473020"
+  },
+  "predictive_alerts": {
+    "description": "Enable predictive cost and resource alerts",
+    "enabled": true,
+    "rollout_strategy": "percentage",
+    "rollout_percentage": 100.0,
+    "target_users": [],
+    "conditions": {},
+    "metadata": {
+      "category": "monitoring",
+      "impact": "low",
+      "dependencies": [
+        "alert_management_agent",
+        "forecasting_agent"
+      ]
+    },
+    "updated_at": "2025-10-26T20:59:47.473020"
+  },
+  "multi_agent_collaboration": {
+    "description": "Enable advanced multi-agent collaboration features",
+    "enabled": true,
+    "rollout_strategy": "user_list",
+    "rollout_percentage": 100.0,
+    "target_users": [
+      "admin"
+    ],
+    "conditions": {},
+    "metadata": {
+      "category": "advanced_features",
+      "impact": "high",
+      "dependencies": [
+        "orchestrator_agent",
+        "mcp_server",
+        "strands_framework"
+      ]
+    },
+    "updated_at": "2025-10-26T20:59:47.478825"
+  }
+}

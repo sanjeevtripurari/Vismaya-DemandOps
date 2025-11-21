@@ -456,6 +456,11 @@ class CostEstimateResponse:
     timestamp: datetime = None
     error_message: Optional[str] = None
     
+    # Smart defaults fields
+    defaults_applied: Optional[List[Any]] = None
+    default_explanation: Optional[str] = None
+    refinement_suggestions: Optional[List[str]] = None
+    
     def __post_init__(self):
         if self.timestamp is None:
             self.timestamp = datetime.now()

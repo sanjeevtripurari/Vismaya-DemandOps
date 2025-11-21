@@ -1,6 +1,7 @@
 import os
 from dotenv import load_dotenv
 
+# Load .env file initially
 load_dotenv()
 
 class Config:
@@ -21,7 +22,10 @@ class Config:
     AWS_SESSION_TOKEN = os.getenv('AWS_SESSION_TOKEN')
     
     # Bedrock Configuration
-    BEDROCK_MODEL_ID = os.getenv('BEDROCK_MODEL_ID', 'us.anthropic.claude-3-haiku-20240307-v1:0')
+    BEDROCK_MODEL_ID = os.getenv('BEDROCK_MODEL_ID', 'anthropic.claude-3-sonnet-20240229-v1:0')
+    BEDROCK_FALLBACK_MODEL_ID = os.getenv('BEDROCK_FALLBACK_MODEL_ID', 'anthropic.claude-3-haiku-20240307-v1:0')
+    BEDROCK_MAX_TOKENS = int(os.getenv('BEDROCK_MAX_TOKENS', 1000))
+    BEDROCK_TEMPERATURE = float(os.getenv('BEDROCK_TEMPERATURE', 0.1))
     
     # Application Configuration
     DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
@@ -33,9 +37,36 @@ class Config:
     BUDGET_WARNING_LIMIT = int(os.getenv('BUDGET_WARNING_LIMIT', 80))  # Warning at $80
     BUDGET_MAXIMUM_LIMIT = int(os.getenv('BUDGET_MAXIMUM_LIMIT', 100))  # Hard limit at $100
     
+    # Cost Explorer Configuration
+    DISABLE_COST_EXPLORER = os.getenv('DISABLE_COST_EXPLORER', 'True').lower() == 'true'
+    USE_REALISTIC_DEMO_DATA = os.getenv('USE_REALISTIC_DEMO_DATA', 'True').lower() == 'true'
+    
     @classmethod
     def is_production(cls):
         return cls.ENVIRONMENT.lower() == 'production'
+    
+    @classmethod
+    def reload_config(cls):
+        """Reload configuration from .env file"""
+        # Force reload of .env file
+        load_dotenv(override=True)
+        
+        # Reload all budget configuration values
+        cls.DEFAULT_BUDGET = int(os.getenv('DEFAULT_BUDGET', 80))
+        cls.BUDGET_WARNING_LIMIT = int(os.getenv('BUDGET_WARNING_LIMIT', 80))
+        cls.BUDGET_MAXIMUM_LIMIT = int(os.getenv('BUDGET_MAXIMUM_LIMIT', 100))
+        
+        # Reload other configurations as needed
+        cls.AWS_REGION = os.getenv('AWS_REGION', 'us-east-2')
+        cls.DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
+        
+        return cls
+    
+    @classmethod
+    def get_fresh_config(cls):
+        """Get a fresh configuration instance with reloaded values"""
+        cls.reload_config()
+        return cls
     
     @classmethod
     def use_sso(cls):

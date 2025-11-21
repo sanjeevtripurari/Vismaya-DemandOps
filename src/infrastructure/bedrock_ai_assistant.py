@@ -18,9 +18,14 @@ logger = logging.getLogger(__name__)
 class BedrockAIAssistant(IAIAssistant):
     """AWS Bedrock AI assistant implementation"""
     
-    def __init__(self, aws_session, model_id: str = "anthropic.claude-3-sonnet-20240229-v1:0"):
+    def __init__(self, aws_session, model_id: str = None):
         self._session = aws_session
-        self._model_id = model_id
+        # Use config values with fallback
+        from config import Config
+        self._model_id = model_id or Config.BEDROCK_MODEL_ID
+        self._fallback_model_id = Config.BEDROCK_FALLBACK_MODEL_ID
+        self._max_tokens = Config.BEDROCK_MAX_TOKENS
+        self._temperature = Config.BEDROCK_TEMPERATURE
         self._bedrock_client = None
         self._initialize_client()
     
@@ -109,7 +114,8 @@ class BedrockAIAssistant(IAIAssistant):
             
             body = json.dumps({
                 "anthropic_version": "bedrock-2023-05-31",
-                "max_tokens": 300,
+                "max_tokens": self._max_tokens,
+                "temperature": self._temperature,
                 "messages": [
                     {
                         "role": "user",
@@ -151,7 +157,8 @@ class BedrockAIAssistant(IAIAssistant):
             
             body = json.dumps({
                 "anthropic_version": "bedrock-2023-05-31",
-                "max_tokens": 500,
+                "max_tokens": self._max_tokens,
+                "temperature": self._temperature,
                 "messages": [
                     {
                         "role": "user",
@@ -201,7 +208,8 @@ class BedrockAIAssistant(IAIAssistant):
             
             body = json.dumps({
                 "anthropic_version": "bedrock-2023-05-31",
-                "max_tokens": 200,
+                "max_tokens": self._max_tokens,
+                "temperature": self._temperature,
                 "messages": [
                     {
                         "role": "user",
@@ -285,23 +293,58 @@ class BedrockAIAssistant(IAIAssistant):
         """Provide factual responses based on actual data"""
         message_lower = message.lower()
         
-        # Current spend queries
-        if any(word in message_lower for word in ['current', 'spend', 'spending', 'cost', 'bill']):
-            if 'month' in message_lower or 'monthly' in message_lower:
-                if context.budget_info.current_spend == 0:
-                    return f"Your current monthly spend is $0.00 because you have no billable AWS resources running in us-east-2 region. Your budget is ${context.budget_info.total_budget:,.2f}, so you're well within limits! You can enable Demo Mode to see how the platform works with sample data."
+        # Database queries - FIRST PRIORITY (postgres, mysql, rds, database)
+        if any(word in message_lower for word in ['database', 'rds', 'db', 'mysql', 'postgres', 'postgresql', 'oracle', 'sql', 'mariadb']):
+            # Check for RDS costs in service costs even if no instances found
+            rds_costs = []
+            total_rds_cost = 0
+            
+            for service_cost in context.service_costs:
+                service_name = getattr(service_cost.cost, 'service_name', service_cost.service_type.value)
+                if 'rds' in service_name.lower() or 'database' in service_name.lower() or 'relational database' in service_name.lower():
+                    if service_cost.cost.amount > 0:
+                        rds_costs.append((service_name, service_cost.cost.amount))
+                        total_rds_cost += service_cost.cost.amount
+            
+            if len(context.database_instances) == 0:
+                if rds_costs:
+                    response = f"You currently have no running RDS instances, but you have database-related costs of ${total_rds_cost:.2f} this month. "
+                    response += "This could be from:\n"
+                    for service_name, cost in rds_costs:
+                        response += f"• {service_name}: ${cost:.2f}\n"
+                    response += "\nThese costs might be from terminated databases, snapshots, or other RDS services."
+                    return response
                 else:
-                    return f"Your current monthly spend is ${context.budget_info.current_spend:,.2f}, which is {context.budget_info.utilization_percentage:.1f}% of your ${context.budget_info.total_budget:,.2f} budget. You have ${context.budget_info.remaining_budget:,.2f} remaining this month."
+                    return "You currently have no RDS database instances and no database-related costs in your AWS account (Region: us-east-2). You can create RDS instances from the AWS Console if needed."
+            
+            total_cost = sum(db.monthly_cost for db in context.database_instances)
+            engines = list(set(db.engine for db in context.database_instances))
+            
+            return f"You have {len(context.database_instances)} RDS instances running {', '.join(engines)} engines, costing ${total_cost:.2f}/month total."
         
-        # Budget queries
-        if any(word in message_lower for word in ['budget', 'limit', 'allowance']):
-            status = "over budget" if context.budget_info.is_over_budget else "within budget"
-            return f"Your monthly budget is ${context.budget_info.total_budget:,.2f}. You've spent ${context.budget_info.current_spend:,.2f} ({context.budget_info.utilization_percentage:.1f}%), so you're currently {status}."
-        
-        # EC2 queries
-        if 'ec2' in message_lower or 'instance' in message_lower:
+        # EC2 queries - SECOND PRIORITY (but exclude database-related servers)
+        if any(word in message_lower for word in ['ec2', 'instance', 'compute']) or ('server' in message_lower and not any(db_word in message_lower for db_word in ['postgres', 'mysql', 'database', 'rds'])):
+            # Check for EC2 costs in service costs even if no instances found
+            ec2_costs = []
+            total_ec2_cost = 0
+            
+            for service_cost in context.service_costs:
+                service_name = getattr(service_cost.cost, 'service_name', service_cost.service_type.value)
+                if 'elastic compute cloud' in service_name.lower() or 'ec2' in service_name.lower():
+                    if service_cost.cost.amount > 0:
+                        ec2_costs.append((service_name, service_cost.cost.amount))
+                        total_ec2_cost += service_cost.cost.amount
+            
             if len(context.ec2_instances) == 0:
-                return "You currently have no EC2 instances in your AWS account (Region: us-east-2). This means no EC2-related costs. To test the platform, you can enable Demo Mode or launch an EC2 instance from the AWS Console."
+                if ec2_costs:
+                    response = f"You currently have no running EC2 instances, but you have EC2-related costs of ${total_ec2_cost:.2f} this month. "
+                    response += "This could be from:\n"
+                    for service_name, cost in ec2_costs:
+                        response += f"• {service_name}: ${cost:.2f}\n"
+                    response += "\nThese costs might be from terminated instances, EBS snapshots, or other EC2 services."
+                    return response
+                else:
+                    return "You currently have no EC2 instances and no EC2-related costs in your AWS account (Region: us-east-2). To test the platform, you can launch an EC2 instance from the AWS Console."
             
             running_instances = [i for i in context.ec2_instances if i.state.value == 'running']
             stopped_instances = [i for i in context.ec2_instances if i.state.value == 'stopped']
@@ -315,10 +358,29 @@ class BedrockAIAssistant(IAIAssistant):
             
             return response
         
-        # Storage queries
-        if any(word in message_lower for word in ['storage', 'ebs', 'volume', 'disk']):
+        # Storage queries - THIRD PRIORITY
+        if any(word in message_lower for word in ['storage', 'ebs', 'volume', 'disk', 's3', 'bucket']):
+            # Check for storage costs in service costs even if no volumes found
+            storage_costs = []
+            total_storage_cost = 0
+            
+            for service_cost in context.service_costs:
+                service_name = getattr(service_cost.cost, 'service_name', service_cost.service_type.value)
+                if any(term in service_name.lower() for term in ['storage', 'ebs', 's3', 'simple storage', 'elastic block']):
+                    if service_cost.cost.amount > 0:
+                        storage_costs.append((service_name, service_cost.cost.amount))
+                        total_storage_cost += service_cost.cost.amount
+            
             if len(context.storage_volumes) == 0:
-                return "You currently have no EBS storage volumes in your AWS account (Region: us-east-2). This means no storage costs. EBS volumes are typically created when you launch EC2 instances."
+                if storage_costs:
+                    response = f"You currently have no EBS volumes, but you have storage-related costs of ${total_storage_cost:.2f} this month. "
+                    response += "This could be from:\n"
+                    for service_name, cost in storage_costs:
+                        response += f"• {service_name}: ${cost:.2f}\n"
+                    response += "\nThese costs might be from S3 buckets, snapshots, or other storage services."
+                    return response
+                else:
+                    return "You currently have no EBS storage volumes and no storage-related costs in your AWS account (Region: us-east-2). EBS volumes are typically created when you launch EC2 instances."
             
             total_size = sum(v.size_gb for v in context.storage_volumes)
             total_cost = sum(v.monthly_cost for v in context.storage_volumes)
@@ -332,10 +394,142 @@ class BedrockAIAssistant(IAIAssistant):
             
             return response
         
-        # Database queries
-        if any(word in message_lower for word in ['database', 'rds', 'db']):
+        # Current spend queries
+        if any(word in message_lower for word in ['current', 'spend', 'spending', 'cost', 'bill']):
+            if 'month' in message_lower or 'monthly' in message_lower:
+                if context.budget_info.current_spend == 0:
+                    return f"Your current monthly spend is $0.00 because you have no billable AWS resources running in us-east-2 region. Your budget is ${context.budget_info.total_budget:,.2f}, so you're well within limits! You can enable Demo Mode to see how the platform works with sample data."
+                else:
+                    return f"Your current monthly spend is ${context.budget_info.current_spend:,.2f}, which is {context.budget_info.utilization_percentage:.1f}% of your ${context.budget_info.total_budget:,.2f} budget. You have ${context.budget_info.remaining_budget:,.2f} remaining this month."
+        
+        # Budget queries
+        if any(word in message_lower for word in ['budget', 'limit', 'allowance']):
+            status = "over budget" if context.budget_info.is_over_budget else "within budget"
+            return f"Your monthly budget is ${context.budget_info.total_budget:,.2f}. You've spent ${context.budget_info.current_spend:,.2f} ({context.budget_info.utilization_percentage:.1f}%), so you're currently {status}."
+        
+        # Services queries - show what services are actually being used
+        if any(word in message_lower for word in ['service', 'services', 'what am i using', 'what services']):
+            paid_services = [sc for sc in context.service_costs if sc.cost.amount > 0]
+            if not paid_services:
+                return f"You're currently not using any billable AWS services. Your total spend is ${context.budget_info.current_spend:.2f}."
+            
+            response = f"You're currently using {len(paid_services)} AWS services with costs:\n"
+            # Show top 5 services by cost
+            paid_services.sort(key=lambda x: x.cost.amount, reverse=True)
+            for i, sc in enumerate(paid_services[:5]):
+                service_name = getattr(sc.cost, 'service_name', sc.service_type.value)
+                response += f"• {service_name}: ${sc.cost.amount:.2f}\n"
+            
+            if len(paid_services) > 5:
+                response += f"...and {len(paid_services) - 5} more services"
+            
+            return response
+        
+        # Resource count queries - only for general resource questions
+        if any(phrase in message_lower for phrase in ['how many resources', 'total resources', 'resource count', 'all resources']):
+            response = f"Your current AWS resources:\n"
+            response += f"• EC2 Instances: {len(context.ec2_instances)}\n"
+            response += f"• Storage Volumes: {len(context.storage_volumes)}\n"
+            response += f"• RDS Databases: {len(context.database_instances)}\n"
+            response += f"• Total Monthly Cost: ${context.budget_info.current_spend:.2f}\n"
+            response += f"• Services with Costs: {len([sc for sc in context.service_costs if sc.cost.amount > 0])}"
+            return response
+        
+        # EC2 queries
+        if 'ec2' in message_lower or 'instance' in message_lower:
+            # Check for EC2 costs in service costs even if no instances found
+            ec2_costs = []
+            total_ec2_cost = 0
+            
+            for service_cost in context.service_costs:
+                service_name = getattr(service_cost.cost, 'service_name', service_cost.service_type.value)
+                if 'elastic compute cloud' in service_name.lower() or 'ec2' in service_name.lower():
+                    if service_cost.cost.amount > 0:
+                        ec2_costs.append((service_name, service_cost.cost.amount))
+                        total_ec2_cost += service_cost.cost.amount
+            
+            if len(context.ec2_instances) == 0:
+                if ec2_costs:
+                    response = f"You currently have no running EC2 instances, but you have EC2-related costs of ${total_ec2_cost:.2f} this month. "
+                    response += "This could be from:\n"
+                    for service_name, cost in ec2_costs:
+                        response += f"• {service_name}: ${cost:.2f}\n"
+                    response += "\nThese costs might be from terminated instances, EBS snapshots, or other EC2 services."
+                    return response
+                else:
+                    return "You currently have no EC2 instances and no EC2-related costs in your AWS account (Region: us-east-2). To test the platform, you can launch an EC2 instance from the AWS Console."
+            
+            running_instances = [i for i in context.ec2_instances if i.state.value == 'running']
+            stopped_instances = [i for i in context.ec2_instances if i.state.value == 'stopped']
+            total_cost = sum(i.monthly_cost for i in context.ec2_instances)
+            
+            response = f"You have {len(context.ec2_instances)} EC2 instances total: {len(running_instances)} running, {len(stopped_instances)} stopped. "
+            response += f"Monthly EC2 cost: ${total_cost:.2f}. "
+            
+            if stopped_instances:
+                response += f"Consider terminating the {len(stopped_instances)} stopped instances to avoid charges."
+            
+            return response
+        
+        # Storage queries - enhanced detection
+        if any(word in message_lower for word in ['storage', 'ebs', 'volume', 'disk', 's3', 'bucket']):
+            # Check for storage costs in service costs even if no volumes found
+            storage_costs = []
+            total_storage_cost = 0
+            
+            for service_cost in context.service_costs:
+                service_name = getattr(service_cost.cost, 'service_name', service_cost.service_type.value)
+                if any(term in service_name.lower() for term in ['storage', 'ebs', 's3', 'simple storage', 'elastic block']):
+                    if service_cost.cost.amount > 0:
+                        storage_costs.append((service_name, service_cost.cost.amount))
+                        total_storage_cost += service_cost.cost.amount
+            
+            if len(context.storage_volumes) == 0:
+                if storage_costs:
+                    response = f"You currently have no EBS volumes, but you have storage-related costs of ${total_storage_cost:.2f} this month. "
+                    response += "This could be from:\n"
+                    for service_name, cost in storage_costs:
+                        response += f"• {service_name}: ${cost:.2f}\n"
+                    response += "\nThese costs might be from S3 buckets, snapshots, or other storage services."
+                    return response
+                else:
+                    return "You currently have no EBS storage volumes and no storage-related costs in your AWS account (Region: us-east-2). EBS volumes are typically created when you launch EC2 instances."
+            
+            total_size = sum(v.size_gb for v in context.storage_volumes)
+            total_cost = sum(v.monthly_cost for v in context.storage_volumes)
+            unattached = [v for v in context.storage_volumes if not v.attached_instance]
+            
+            response = f"You have {len(context.storage_volumes)} EBS volumes totaling {total_size:,} GB, costing ${total_cost:.2f}/month. "
+            
+            if unattached:
+                unattached_cost = sum(v.monthly_cost for v in unattached)
+                response += f"Warning: {len(unattached)} volumes ({unattached_cost:.2f}/month) are unattached and could be deleted."
+            
+            return response
+        
+        # Database queries - enhanced detection
+        if any(word in message_lower for word in ['database', 'rds', 'db', 'mysql', 'postgres', 'oracle', 'sql']):
+            # Check for RDS costs in service costs even if no instances found
+            rds_costs = []
+            total_rds_cost = 0
+            
+            for service_cost in context.service_costs:
+                service_name = getattr(service_cost.cost, 'service_name', service_cost.service_type.value)
+                if 'rds' in service_name.lower() or 'database' in service_name.lower() or 'relational database' in service_name.lower():
+                    if service_cost.cost.amount > 0:
+                        rds_costs.append((service_name, service_cost.cost.amount))
+                        total_rds_cost += service_cost.cost.amount
+            
             if len(context.database_instances) == 0:
-                return "You currently have no RDS database instances in your AWS account (Region: us-east-2). This means no database costs. You can create RDS instances from the AWS Console if needed."
+                if rds_costs:
+                    response = f"You currently have no running RDS instances, but you have database-related costs of ${total_rds_cost:.2f} this month. "
+                    response += "This could be from:\n"
+                    for service_name, cost in rds_costs:
+                        response += f"• {service_name}: ${cost:.2f}\n"
+                    response += "\nThese costs might be from terminated databases, snapshots, or other RDS services."
+                    return response
+                else:
+                    return "You currently have no RDS database instances and no database-related costs in your AWS account (Region: us-east-2). You can create RDS instances from the AWS Console if needed."
             
             total_cost = sum(db.monthly_cost for db in context.database_instances)
             engines = list(set(db.engine for db in context.database_instances))

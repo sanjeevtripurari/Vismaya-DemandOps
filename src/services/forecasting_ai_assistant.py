@@ -48,35 +48,38 @@ class ForecastingAIAssistant(IForecastingAIAssistant):
         ]
     
     async def process_cost_query(self, query: str, context: ForecastingContext) -> CostEstimateResponse:
-        """Process natural language cost estimation query"""
+        """Process natural language cost estimation query with smart defaults"""
         try:
             logger.info(f"Processing cost query: {query}")
             
-            # Parse the query to extract resource specification
+            # Apply smart defaults to incomplete queries
+            from .smart_defaults_processor import SmartDefaultsProcessor
+            defaults_processor = SmartDefaultsProcessor()
+            
+            # Get complete specification with defaults applied
+            complete_spec = defaults_processor.apply_defaults(query)
+            
+            # Convert to ResourceSpecification format
             try:
-                resource_spec = self._query_parser.parse_resource_query(query)
-            except InvalidResourceSpecificationError as e:
+                resource_spec = self._convert_to_resource_spec(complete_spec)
+            except Exception as e:
                 return CostEstimateResponse(
                     resource_spec=ResourceSpecification(resource_type=None),
                     pricing_breakdown={},
                     total_cost=0.0,
                     duration=TimePeriod.from_months(1),
-                    error_message=f"Could not understand the query: {str(e)}"
+                    error_message=f"Could not process the query: {str(e)}",
+                    defaults_applied=complete_spec.get('applied_defaults', []),
+                    default_explanation=defaults_processor.format_defaults_explanation(
+                        complete_spec.get('applied_defaults', []), 
+                        complete_spec.get('resource_type', 'ec2')
+                    )
                 )
             
-            # Extract time period
-            duration = self._query_parser.extract_time_period(query)
+            # Extract time period from complete specification
+            duration = TimePeriod.from_months(complete_spec.get('duration_months', 1))
             
-            # Check if we need clarification
-            if self._query_parser.needs_clarification(resource_spec):
-                clarification_questions = self._query_parser.generate_clarification_questions(resource_spec)
-                return CostEstimateResponse(
-                    resource_spec=resource_spec,
-                    pricing_breakdown={},
-                    total_cost=0.0,
-                    duration=duration,
-                    error_message="Need more information: " + "; ".join(clarification_questions)
-                )
+            # No need to check for clarification - we have complete specs with defaults
             
             # Get pricing data
             try:
@@ -87,13 +90,37 @@ class ForecastingAIAssistant(IForecastingAIAssistant):
                     pricing_breakdown={},
                     total_cost=0.0,
                     duration=duration,
-                    error_message=str(e)
+                    error_message=str(e),
+                    defaults_applied=complete_spec.get('applied_defaults', []),
+                    default_explanation=defaults_processor.format_defaults_explanation(
+                        complete_spec.get('applied_defaults', []), 
+                        complete_spec.get('resource_type', 'ec2')
+                    )
                 )
             
             # Calculate cost estimate
             cost_estimate = await self._cost_engine.estimate_resource_cost(
                 resource_spec, pricing_data, duration
             )
+            
+            # Add smart defaults information to the response
+            cost_estimate.defaults_applied = complete_spec.get('applied_defaults', [])
+            cost_estimate.default_explanation = defaults_processor.format_defaults_explanation(
+                complete_spec.get('applied_defaults', []), 
+                complete_spec.get('resource_type', 'ec2')
+            )
+            cost_estimate.refinement_suggestions = defaults_processor.get_refinement_suggestions(
+                complete_spec.get('resource_type', 'ec2'),
+                complete_spec.get('applied_defaults', [])
+            )
+            
+            # Add multi-resource notes if available
+            if complete_spec.get('storage_note'):
+                cost_estimate.storage_note = complete_spec['storage_note']
+            if complete_spec.get('database_note'):
+                cost_estimate.database_note = complete_spec['database_note']
+            if complete_spec.get('multi_resource_notes'):
+                cost_estimate.multi_resource_notes = complete_spec['multi_resource_notes']
             
             # Add budget impact analysis if context is available
             if context and context.budget_info and cost_estimate.is_successful:
@@ -168,6 +195,52 @@ class ForecastingAIAssistant(IForecastingAIAssistant):
         except Exception as e:
             logger.error(f"Failed to get pricing for {resource_spec.resource_type.value}: {e}")
             raise
+    
+    def _convert_to_resource_spec(self, complete_spec: Dict) -> ResourceSpecification:
+        """Convert smart defaults format to ResourceSpecification"""
+        from ..core.models import ResourceType
+        
+        # Map resource type string to enum
+        resource_type_map = {
+            'ec2': ResourceType.EC2,
+            'rds': ResourceType.RDS,
+            'ebs': ResourceType.EBS,
+            's3': ResourceType.S3,
+            'lambda': ResourceType.LAMBDA
+        }
+        
+        resource_type = resource_type_map.get(complete_spec.get('resource_type', 'ec2'), ResourceType.EC2)
+        
+        # Build additional specs based on resource type
+        additional_specs = {}
+        
+        if resource_type == ResourceType.EC2:
+            additional_specs = {
+                'pricing_model': complete_spec.get('pricing_model', 'on-demand')
+            }
+        elif resource_type == ResourceType.RDS:
+            additional_specs = {
+                'engine': complete_spec.get('engine', 'mysql'),
+                'storage_gb': complete_spec.get('storage_gb', 20)
+            }
+        elif resource_type == ResourceType.EBS:
+            additional_specs = {
+                'volume_type': complete_spec.get('volume_type', 'gp3'),
+                'size_gb': complete_spec.get('size_gb', 20)
+            }
+        elif resource_type == ResourceType.LAMBDA:
+            additional_specs = {
+                'memory_mb': complete_spec.get('memory_mb', 128),
+                'executions_per_month': complete_spec.get('executions_per_month', 1000)
+            }
+        
+        return ResourceSpecification(
+            resource_type=resource_type,
+            instance_type=complete_spec.get('instance_type'),
+            quantity=complete_spec.get('quantity', 1),
+            region=complete_spec.get('region', 'us-east-2'),
+            additional_specs=additional_specs
+        )
     
     async def chat_response(self, message: str, context: ForecastingContext) -> str:
         """Handle chat interactions with forecasting context"""
@@ -273,6 +346,26 @@ class ForecastingAIAssistant(IForecastingAIAssistant):
                 response_parts.append(f"⚠️ **WARNING**: Exceeds warning limit by ${impact.warning_threshold_impact:.2f}")
             else:
                 response_parts.append("✅ Within budget limits")
+        
+        # Smart defaults explanation
+        if cost_estimate.defaults_applied and len(cost_estimate.defaults_applied) > 0:
+            response_parts.append(f"\n{cost_estimate.default_explanation}")
+        
+        # Multi-resource notes
+        if hasattr(cost_estimate, 'storage_note') and cost_estimate.storage_note:
+            response_parts.append(f"\n💾 **Storage:** {cost_estimate.storage_note}")
+        
+        if hasattr(cost_estimate, 'database_note') and cost_estimate.database_note:
+            response_parts.append(f"\n🗄️ **PostgreSQL:** {cost_estimate.database_note}")
+        
+        if hasattr(cost_estimate, 'multi_resource_notes') and cost_estimate.multi_resource_notes:
+            response_parts.append(f"\n📝 **Additional:** {cost_estimate.multi_resource_notes}")
+        
+        # Refinement suggestions
+        if cost_estimate.refinement_suggestions:
+            response_parts.append("\n🎯 **For more precise estimates:**")
+            for suggestion in cost_estimate.refinement_suggestions:
+                response_parts.append(f"• {suggestion}")
         
         # Recommendations
         if cost_estimate.recommendations:

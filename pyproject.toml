@@ -1,0 +1,225 @@
+[build-system]
+requires = ["setuptools>=65.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vismaya-demandops-agentic"
+version = "1.0.0"
+description = "Agentic AI System for AWS Cost Management and Resource Optimization"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Vismaya DemandOps Team", email = "team@vismaya.com"}
+]
+maintainers = [
+    {name = "Vismaya DemandOps Team", email = "team@vismaya.com"}
+]
+keywords = [
+    "aws", "cost-management", "ai", "agents", "automation", 
+    "cloud", "finops", "devops", "machine-learning"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Systems Administration",
+    "Topic :: Office/Business :: Financial",
+]
+requires-python = ">=3.9"
+dependencies = [
+    "streamlit>=1.28.0,<2.0.0",
+    "boto3>=1.34.0,<2.0.0",
+    "botocore>=1.34.0,<2.0.0",
+    "pandas>=2.0.0,<3.0.0",
+    "numpy>=1.24.0,<2.0.0",
+    "plotly>=5.17.0,<6.0.0",
+    "python-dotenv>=1.0.0,<2.0.0",
+    "requests>=2.31.0,<3.0.0",
+    "setuptools>=65.0.0",
+    "psutil>=5.9.0,<6.0.0",
+    "aiofiles>=23.0.0,<24.0.0",
+    "aiohttp>=3.9.0,<4.0.0",
+    "pydantic>=2.5.0,<3.0.0",
+    "marshmallow>=3.20.0,<4.0.0",
+    "sqlalchemy>=2.0.0,<3.0.0",
+    "alembic>=1.13.0,<2.0.0",
+    "redis>=5.0.0,<6.0.0",
+    "cachetools>=5.3.0,<6.0.0",
+    "structlog>=23.2.0,<24.0.0",
+    "prometheus-client>=0.19.0,<1.0.0",
+    "anthropic>=0.8.0,<1.0.0",
+    "openai>=1.6.0,<2.0.0",
+    "langchain>=0.1.0,<1.0.0",
+    "langchain-community>=0.0.10,<1.0.0",
+    "sendgrid>=6.11.0,<7.0.0",
+    "cryptography>=41.0.0,<42.0.0",
+    "pyjwt>=2.8.0,<3.0.0",
+    "bcrypt>=4.1.0,<5.0.0",
+    "python-dateutil>=2.8.0,<3.0.0",
+    "pytz>=2023.3",
+    "jsonschema>=4.20.0,<5.0.0",
+    "pyyaml>=6.0.1,<7.0.0",
+    "networkx>=3.2.0,<4.0.0",
+    "transitions>=0.9.0,<1.0.0",
+    "rich>=13.7.0,<14.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black>=23.12.0,<24.0.0",
+    "isort>=5.13.0,<6.0.0",
+    "flake8>=7.0.0,<8.0.0",
+    "pylint>=3.0.0,<4.0.0",
+    "mypy>=1.8.0,<2.0.0",
+    "pytest>=7.4.0,<8.0.0",
+    "pytest-asyncio>=0.23.0,<1.0.0",
+    "pytest-mock>=3.12.0,<4.0.0",
+    "pytest-cov>=4.1.0,<5.0.0",
+    "pytest-xdist>=3.5.0,<4.0.0",
+    "coverage>=7.4.0,<8.0.0",
+    "pre-commit>=3.6.0,<4.0.0",
+]
+docs = [
+    "sphinx>=7.2.0,<8.0.0",
+    "sphinx-rtd-theme>=2.0.0,<3.0.0",
+    "myst-parser>=2.0.0,<3.0.0",
+]
+test = [
+    "pytest>=7.4.0,<8.0.0",
+    "pytest-asyncio>=0.23.0,<1.0.0",
+    "pytest-mock>=3.12.0,<4.0.0",
+    "pytest-cov>=4.1.0,<5.0.0",
+    "pytest-xdist>=3.5.0,<4.0.0",
+    "coverage>=7.4.0,<8.0.0",
+]
+
+[project.scripts]
+vismaya-migrate = "agentic.migration.enable_all_features:main"
+vismaya-demo = "demo_migration:main"
+
+[project.urls]
+Homepage = "https://github.com/vismaya/demandops-agentic"
+Documentation = "https://demandops-agentic.readthedocs.io/"
+Repository = "https://github.com/vismaya/demandops-agentic"
+"Bug Tracker" = "https://github.com/vismaya/demandops-agentic/issues"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ['py39', 'py310', 'py311', 'py312']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+ensure_newline_before_comments = true
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+module = [
+    "streamlit.*",
+    "plotly.*",
+    "boto3.*",
+    "botocore.*",
+    "anthropic.*",
+    "openai.*",
+    "langchain.*",
+    "redis.*",
+    "transitions.*",
+    "networkx.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q --strict-markers --strict-config"
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+    "e2e: marks tests as end-to-end tests",
+]
+
+[tool.coverage.run]
+source = ["src"]
+omit = [
+    "*/tests/*",
+    "*/test_*",
+    "*/__pycache__/*",
+    "*/venv/*",
+    "*/env/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
+
+[tool.pylint.messages_control]
+disable = [
+    "C0330",  # Wrong hanging indentation
+    "C0326",  # Bad whitespace
+    "R0903",  # Too few public methods
+    "R0913",  # Too many arguments
+    "W0613",  # Unused argument
+]
+
+[tool.pylint.format]
+max-line-length = 100

@@ -24,6 +24,7 @@ from ..services.resource_service import ResourceManagementService
 from ..services.query_parser import NaturalLanguageQueryParser
 from ..services.cost_estimation_engine import CostEstimationEngine
 from ..services.forecasting_ai_assistant import ForecastingAIAssistant
+from ..services.tabular_data_service import TabularDataService
 from .use_cases import (
     GetUsageSummaryUseCase, AnalyzeScenarioUseCase, 
     GetCostInsightsUseCase, HandleChatUseCase, GetResourceDetailsUseCase
@@ -33,47 +34,93 @@ logger = logging.getLogger(__name__)
 
 
 class SimpleForecastingService(IForecastingService):
-    """Enhanced forecasting implementation with organic growth projections"""
+    """Enhanced forecasting implementation using real Cost Explorer data"""
     
     async def generate_forecast(self, historical_data):
         from ..core.models import CostForecast
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        
         if not historical_data:
+            logger.warning("No historical data available for forecasting")
             return CostForecast(
                 forecasted_amount=0.0,
                 confidence_level=0.0,
                 forecast_period_days=30,
-                base_amount=0.0
+                base_amount=0.0,
+                trend_factor=1.0,
+                daily_growth_rate=0.0
             )
         
-        # Calculate organic growth based on current usage patterns
+        # Use the most recent month as base
         recent_amount = historical_data[-1].amount
+        logger.info(f"Base amount for forecast: ${recent_amount:.2f}")
         
-        if len(historical_data) > 1:
-            # Calculate trend from historical data
-            previous_amount = historical_data[-2].amount
-            growth_rate = (recent_amount - previous_amount) / previous_amount if previous_amount > 0 else 0
+        # Calculate trend using multiple data points for better accuracy
+        if len(historical_data) >= 3:
+            # Use weighted average of recent trends
+            trends = []
+            for i in range(len(historical_data) - 1, 0, -1):
+                current = historical_data[i].amount
+                previous = historical_data[i-1].amount
+                if previous > 0:
+                    month_growth = (current - previous) / previous
+                    trends.append(month_growth)
+            
+            if trends:
+                # Weight recent trends more heavily
+                weights = [2**i for i in range(len(trends))]
+                weighted_growth = sum(t * w for t, w in zip(trends, weights)) / sum(weights)
+            else:
+                weighted_growth = 0.0
+                
+        elif len(historical_data) == 2:
+            # Simple month-over-month growth
+            current = historical_data[-1].amount
+            previous = historical_data[-2].amount
+            weighted_growth = (current - previous) / previous if previous > 0 else 0.0
         else:
-            # For single data point, assume minimal organic growth
-            growth_rate = 0.05  # 5% monthly growth for new accounts
+            # Single data point - use conservative growth based on service type analysis
+            weighted_growth = 0.02  # 2% monthly growth for established accounts
         
-        # Cap growth rate to realistic bounds
-        growth_rate = max(-0.5, min(growth_rate, 2.0))  # Between -50% and 200%
+        # Apply realistic bounds and adjust for Cost Explorer usage patterns
+        # Cost Explorer API calls tend to be consistent, so cap growth
+        weighted_growth = max(-0.3, min(weighted_growth, 0.5))  # Between -30% and 50%
         
-        # Calculate daily growth rate
-        daily_growth_rate = growth_rate / 30
+        # Calculate daily growth rate for timeline predictions
+        daily_growth_rate = weighted_growth / 30
         
-        # Project 30-day forecast with organic growth
-        forecasted_amount = recent_amount * (1 + growth_rate)
+        # Project 30-day forecast with compound growth
+        forecasted_amount = recent_amount * (1 + weighted_growth)
         
-        # Calculate confidence based on data availability
-        confidence = min(0.9, 0.5 + (len(historical_data) * 0.1))
+        # Calculate confidence based on data quality and consistency
+        confidence = 0.5  # Base confidence
+        if len(historical_data) >= 3:
+            confidence += 0.2  # More data points
+        if len(historical_data) >= 6:
+            confidence += 0.2  # Full 6-month history
+        
+        # Adjust confidence based on trend consistency
+        if len(historical_data) >= 2:
+            # Check if trend is consistent (low variance)
+            amounts = [d.amount for d in historical_data[-3:]]  # Last 3 months
+            if len(amounts) >= 2:
+                avg_amount = sum(amounts) / len(amounts)
+                variance = sum((x - avg_amount) ** 2 for x in amounts) / len(amounts)
+                if variance < (avg_amount * 0.1) ** 2:  # Low variance
+                    confidence += 0.1
+        
+        confidence = min(0.95, confidence)  # Cap at 95%
+        
+        logger.info(f"Forecast: ${forecasted_amount:.2f} (growth: {weighted_growth*100:.1f}%, confidence: {confidence*100:.1f}%)")
         
         return CostForecast(
             forecasted_amount=forecasted_amount,
             confidence_level=confidence,
             forecast_period_days=30,
             base_amount=recent_amount,
-            trend_factor=1 + growth_rate,
+            trend_factor=1 + weighted_growth,
             daily_growth_rate=daily_growth_rate
         )
     
@@ -120,8 +167,14 @@ class DependencyContainer:
             # Data repository
             self._services['data_repository'] = SQLiteRepository()
             
-            # Data providers
-            self._services['cost_provider'] = AWSCostProvider(aws_session, self._config)
+            # Data providers - choose based on configuration
+            if getattr(self._config, 'DISABLE_COST_EXPLORER', True):
+                logger.info("🔍 Using Real Usage Analyzer (Cost Explorer disabled)")
+                from ..infrastructure.real_usage_analyzer import RealUsageAnalyzer
+                self._services['cost_provider'] = RealUsageAnalyzer(aws_session, self._config)
+            else:
+                logger.info("📊 Using AWS Cost Explorer API")
+                self._services['cost_provider'] = AWSCostProvider(aws_session, self._config)
             self._services['resource_provider'] = AWSResourceProvider(aws_session)
             self._services['forecasting_service'] = SimpleForecastingService()
             self._services['ai_assistant'] = BedrockAIAssistant(
@@ -145,6 +198,9 @@ class DependencyContainer:
                 self._services['cost_estimation_engine'],
                 self._services['ai_assistant']
             )
+            
+            # Tabular data services
+            self._services['tabular_data_service'] = TabularDataService()
             
             # Application services
             self._services['cost_service'] = CostAnalysisService(

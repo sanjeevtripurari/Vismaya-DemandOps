@@ -1,0 +1,362 @@
+Current usage -
+1. Should only current summary of real data form AWS, all the resources, instances, storage, serverless and other applications being used. Show graphs based on current summary.
+2. Should show detailed billing for each of the services, charges currently being used (daily and monthly). Show the graphs on detailed billing.
+3. AI assistant for user to query on current usage optimisation, how can we reduce bill, is any resources be stopped or terminated. 
+Forecasting (AI to query of requirements, like need 2 ec2 instance with 20 gb storage, 2 postgres, 3 elastic ip, something like this) it should show graphs based on current vs forecated, cost analysis
+
+Decisions, where user can upload csv, as provided by @Sarvagya , mainly 2 and 3 only, and add approval
+Settings to add aws credentials from ui so .env is updated and ui is refreshed
+
+
+Current usage tab -
+1. Current summary -
+compare with the image and please make sure we have the current metrics available. 
+2. Detailed billing -
+compare with the image and please make sure we have the current metrics available. we need a detailed billing only for previous and current month.
+3. AI assistant -
+"Ask me about your current usage" - remove this in block
+
+It is not giving correct response - "AI Assistant
+
+I can help you optimize your AWS costs! Here's your current situation:
+
+Current Usage Summary:
+
+Monthly Spend: 
+1,234.56
+o
+f
+1,234.56of2,000.00 budget
+Active Resources: 47 resources across AWS services
+Top Services: EC2 (
+567.89
+)
+,
+S
+3
+(
+567.89),S3(234.56), RDS ($123.45)
+Optimization Opportunities: 3 identified" 
+
+please use the correct LLM model to pass the correct complex query and give me result from my AWS environment. 
+
+"AI Assistant
+
+EC2 Utilization Analysis:
+
+Current EC2 Spend: $567.89/month (46% of total costs)
+
+Utilization Findings:
+
+3 instances running at <10% CPU for 7+ days
+2 instances with memory utilization <20%
+1 instance that could be downsized from m5.large to m5.small"
+
+it has not answered me correctly
+
+please check if i am running any ec2 instances
+
+Current Usage -
+2. Detailed billing -
+	Give the trends only for previous month and current month for - Daily Billing Trend, Monthly Billing Trend.
+	in Service-wise Billing Breakdown we need mention all the services (expand other services) explicitly.
+
+
+AI Assistant
+
+EC2 Analysis:
+
+Based on your current AWS account, you are not running any EC2 instances.
+
+Current Status:
+
+EC2 Instances: 0 running
+EC2 Costs: $0.00/month
+Total Active Resources: 0
+Your AWS Usage:
+
+Current Spend: 
+33.41
+o
+f
+33.41of80.00 budget
+Active Services: 4 services with costs
+Top Services: Cost Explorer (
+33.10
+)
+,
+B
+e
+d
+r
+o
+c
+k
+(
+33.10),Bedrock(0.30), Other Services ($0.01)
+Since you're not running EC2 instances, your costs are coming from other AWS services. Would you like me to analyze your other service costs instead?
+
+ AI Assistant
+
+AWS Usage Summary:
+
+Current Status:
+
+Monthly Spend: 
+33.41
+o
+f
+33.41of80.00 budget
+Active Resources: 0 resources
+Services with Costs: 4
+Optimization Opportunities: 2
+Your Top Services: Cost Explorer (
+33.10
+)
+,
+B
+e
+d
+r
+o
+c
+k
+(
+33.10),Bedrock(0.30), Other Services ($0.01)
+
+I can help you with:
+
+Analyzing your current AWS costs and usage
+Identifying optimization opportunities
+Checking for unused or underutilized resources
+Providing specific recommendations for cost reduction
+Try asking:
+
+"Do I have any EC2 instances running?"
+"What are my most expensive services?"
+"How can I reduce my AWS costs?"
+"What unused resources can I remove?"
+What would you like to explore?
+
+AI assistant should only answer my query. Do not give extra details.
+
+In current usage tab -
+
+AI assistant -
+
+it is not answering based on the actual data.
+
+
+
+You
+
+give me number of postgres intances i have
+
+18:10:46
+
+🤖 AI Assistant
+
+Current AWS usage: $33.41 spend, 0 resources, 4 active services. Ask me about costs, EC2 instances, or optimization opportunities.
+
+18:10:46
+
+👤 You
+
+what is my current cost explorer billing
+
+18:11:35
+
+🤖 AI Assistant
+
+Current spend: 33.41of33.41of80.00 budget (0 resources, 4 services with costs).
+
+18:11:35
+
+👤 You
+
+what are the 4 services i have. list them out
+
+18:12:07
+
+🤖 AI Assistant
+
+Current AWS usage: $33.41 spend, 0 resources, 4 active services. Ask me about costs, EC2 instances, or optimization opportunities.
+
+
+
+2. Detailed billing -
+
+	Give the trends only for previous month and current month for - Daily Billing Trend, Monthly Billing Trend.
+
+Daily Billing Trend should be shown for last 30 days trending. in Monthly Billing Trend, we need exact values for previous month and current month. 
+Other services should expand and show all the minor services. 
+
+In AI assistant -
+ You
+
+how many static IPs i have. what is the cost for them?
+
+18:20:54
+
+🤖 AI Assistant
+
+Current spend: 
+33.41
+o
+f
+33.41of80.00 budget (0 resources, 4 services with costs).
+
+It did not give the correct answers. please check the aws for static IPs and build.
+
+----------------------------
+
+UI is still showing other services instead of the expanded individual services in Service-wise Billing Breakdown.
+
+-----------------------------
+
+1. Cost Explorer: $33.10
+   2. Bedrock: $0.30
+   3. VPC: $0.005
+   4. CloudTrail: $0.003
+   5. Route 53: $0.002
+   6. Config: $0.001
+
+--------------------------------
+
+Are these the correct values? Please fix the recommendations and alerts based on current usage.
+
+And in the Service-wise Billing Breakdown also provide the number of tokens used in bedrock along with the model, number of API calls made to cost explorer, and similar detailed report for other services/resources being used.
+
+-------------------------------
+
+can you do test for current usage of resources, instances, services. 
+
+-------------------------------
+
+ You
+
+how many ec2 intances and postgres services are running?
+
+21:48:20
+
+🤖 AI Assistant
+
+You have no RDS/PostgreSQL instances running.
+
+21:48:20
+
+👤 You
+
+what is storage capacity added to ec2 instance, how many elasic IP and bedrock billing?
+
+21:49:22
+
+🤖 AI Assistant
+
+You have 1 EC2 instances: 1 running, 0 stopped. Total EC2 cost: $50.00/month.
+
+AI assistant is not able to answer for all the resources in a single query.
+
+--------------------------------------------------
+
+remove "Quick Optimization Actions" block in AI assistant sub tab
+
+--------------------------------------------------
+
+In forecasting tab, add 2 new subtabs - 
+current resource forecast subtab - 
+1. current usage forecasted for next 6 months in organic manner.
+2. It should show the graphs for resource utilization and billing for next  6 months.
+ai assistant subtab -
+1. user will ask questions which can be forecasted based on user provided resources, quantity, duration and billing accordingly.
+2. Also provide optimization possible based on user query to reduce the billing.
+
+-------------------------------------------------
+
+thing to remove - 
+2. Tabular View tab
+3. Analytics tab
+4. Optimization tab
+
+-------------------------------------------------
+
+In overview tab, remove these things from the right side -
+1. Ai Assistant and corresponding blocks
+2. Quick actions.
+
+--------------------------------------------------
+
+this is the current usage and billing for the month october 2025. take all these services and instances into consideration before calculating the organic growth.
+
+--------------------------------------------------
+
+(((((((((((((((all the data must start from October))))))))))))))))))))))
+
+--------------------------------------------------
+
+Decisions tab - 
+subtab - resource sheet 
+1. csv upload
+Resource Type	Quantity / Size	Description or Use Case	Duration (if temporary)	Cost Estimation
+Compute (EC2)	12 instances (m6i.large)	Application servers for API backend	2 months	
+based on the column names, it should give the cost estimation considering the other columns with actual values.
+the output should be in the same format at provided in csv, filling the cost estimation. show the updated csv with download option.
+2. plot graphs based on current resource allocation and compare with provided csv 
+for resource change and billing and also give the trending graphs
+3. it should give recommendation for most optimised billing and resource allocation. also it should give the download option in the similar csv format, with optimization for each of the resource type.
+4. approval based on the csv uploaded and cost estimation or approval based on the recommendation.
+
+subtab - budgeting
+Field	Description	Example
+Estimated Monthly Cost	Total AWS spend expected	$8,000 USD
+1. user will provide budget for the project in csv and the response should be provide resource allocation based on budget. in case it does not fit highlight optimisation to fit in budget.
+2. plot graphs based on the current budget as per current resource allocation and compare with provided csv 
+for resource change and budget and also give the trending graphs.
+3. approval based on the csv uploaded based on the budget and cost estimation or approval based on the recommendation budget.
+
+note: reuse the quick action buttons to implement approve, reject. review and email. we need to have a templete generated with details for finops team(current cost, resource allocation, budget allocation, and billing), devops team(current resource allocation, forecasted allocation based on csv uploaded) and CTO(current cost estimation vs. forecasted estimation considering the given duration and 6 more months)
+
+---------------------------------------------------
+
+update vismaya-readme.md, vismaya-system-flow.md based on the current working environment as per the md files requirement.
+
+--------------------------------------------------
+
+in decision tab resource sheet after uploading csv, Budget-Compliant Optimization Recommendations, in Optimized Resource Plan table budget impact column, fix the values.
+
+--------------------------------------------------
+
+current usage from oct 25 - mar 26 - 85
+forecast from 
+
+--------------------------------------------------
+
+in decisions tab -
+6-Month Cost Trending
+instead of 6 months trending it should give the graph based on exact duration specified in csv.
+i need a histogram instead of the line graph.
+
+---------------------------------------------------
+
+forecasting - Billing Forecast
+remove cumulative cost line
+
+settings - UI fix
+# Budget Configuration
+DEFAULT_BUDGET=80
+BUDGET_WARNING_LIMIT=80
+BUDGET_MAXIMUM_LIMIT=100
+
+
+---------------------------------------------------
+
+Fix this error in settings tab - appearance subtab
+❌ Error initializing dashboard: 'optimization_tips'
+Full error: Traceback (most recent call last): File "C:\Users\venka\OneDrive\Desktop\Vismaya-DemandOps\dashboard.py", line 42, in main dashboard.render_enhanced_dashboard() ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^ File "C:\Users\venka\OneDrive\Desktop\Vismaya-DemandOps\src\ui\enhanced_dashboard.py", line 68, in render_enhanced_dashboard self._render_main_content() ~~~~~~~~~~~~~~~~~~~~~~~~~^^ File "C:\Users\venka\OneDrive\Desktop\Vismaya-DemandOps\src\ui\enhanced_dashboard.py", line 179, in _render_main_content self._render_settings_dashboard() ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^ File "C:\Users\venka\OneDrive\Desktop\Vismaya-DemandOps\src\ui\enhanced_dashboard.py", line 570, in _render_settings_dashboard self.modern_dashboard.render_modern_tabs([ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^ { ^ ...<14 lines>... } ^ ]) ^^ File "C:\Users\venka\OneDrive\Desktop\Vismaya-DemandOps\src\ui\modern_dashboard.py", line 525, in render_modern_tabs content_func() ~~~~~~~~~~~~^^ File "C:\Users\venka\OneDrive\Desktop\Vismaya-DemandOps\src\ui\enhanced_dashboard.py", line 1226, in _render_notification_settings prefs['optimization_tips'] = st.checkbox("Optimization Tips", value=prefs['optimization_tips']) ~~~~~^^^^^^^^^^^^^^^^^^^^^ KeyError: 'optimization_tips'
+
+in settings tab - 
+also add provision to set these values and update the same in .env file
+# Budget Configuration
+DEFAULT_BUDGET=80
+BUDGET_WARNING_LIMIT=80
+BUDGET_MAXIMUM_LIMIT=100
